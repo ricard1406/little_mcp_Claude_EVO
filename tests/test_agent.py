@@ -90,3 +90,15 @@ def test_trimming_keeps_tool_calls_with_their_results():
     assert [m.content for m in trimmed] == ["q2", "a2"]
     # A single turn longer than the limit is kept whole.
     assert KeepRecentMessages(max_messages=2)._trim(msgs[:4]) == msgs[:4]
+
+
+def test_server_gets_only_the_settings_it_needs(monkeypatch):
+    from little_mcp.agent import _server_env
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "secret")
+    monkeypatch.setenv("PS1", "${debian_chroot:+($debian_chroot)}$ ")
+    monkeypatch.setenv("OPENWEATHER_API_KEY", "weather-key")
+    env = _server_env()
+    assert "ANTHROPIC_API_KEY" not in env and "PS1" not in env
+    assert env["OPENWEATHER_API_KEY"] == "weather-key"
+    assert "PATH" in env

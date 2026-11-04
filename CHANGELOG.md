@@ -24,6 +24,7 @@ The features are the same; the architecture and safety are new.
 - The calculator parses expressions safely (no `eval`).
 - `.env` is git-ignored, and `.env.example` documents the settings. The
   `--api-key` flag was removed so keys stay out of shell history.
+- The MCP server only receives the settings it needs; the Anthropic key stays with the agent.
 
 ### Fixes
 - `python -m little_mcp` works without arguments; `text` mode is the default.
@@ -46,5 +47,5 @@ The features are the same; the architecture and safety are new.
 
 ### Project
 - Python package with `pyproject.toml` and optional extras: `claude`, `ui`, `mariadb`, `dev`.
-- A pytest suite of 38 tests that need no LLM or network.
+- A pytest suite of 39 tests that need no LLM or network.
 - Uses LangChain v1 (`create_agent`). `langchain-community` is no longer needed.

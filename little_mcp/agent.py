@@ -155,6 +155,21 @@ def _tool_text(msg: ToolMessage) -> str:
     return "\n".join(b.get("text", "") if isinstance(b, dict) else str(b) for b in msg.content)
 
 
+# Settings the server may need from the shell. Everything else (including the
+# Anthropic key) stays with the agent; the server also reads .env itself.
+_SERVER_ENV_PREFIXES = ("LITTLE_MCP_", "OPENWEATHER_", "DB_", "SQLITE_", "EMBED_", "OLLAMA_", "MCP_",
+                        "HTTP_TIMEOUT", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy",
+                        "no_proxy")
+
+
+def _server_env() -> dict[str, str]:
+    from mcp.client.stdio import get_default_environment
+
+    env = get_default_environment()
+    env.update({k: v for k, v in os.environ.items() if k.startswith(_SERVER_ENV_PREFIXES)})
+    return env
+
+
 # --- Agent ----------------------------------------------------------------------
 
 
@@ -181,7 +196,7 @@ class LittleAgent:
             "command": sys.executable,
             "args": ["-m", "little_mcp.server"],
             "cwd": str(config.PROJECT_ROOT),
-            "env": dict(os.environ),
+            "env": _server_env(),
         }
 
     async def __aenter__(self):

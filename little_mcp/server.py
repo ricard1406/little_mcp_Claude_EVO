@@ -26,7 +26,8 @@ from .store import Inventory, Table
 
 # In stdio mode stdout carries the protocol, so logs must go to stderr.
 logging.basicConfig(level=logging.INFO, stream=sys.stderr, format="%(levelname)s %(name)s: %(message)s")
-logging.getLogger("mcp").setLevel(logging.WARNING)
+for noisy in ("mcp", "httpx", "chromadb"):
+    logging.getLogger(noisy).setLevel(logging.WARNING)
 log = logging.getLogger("little_mcp")
 
 mcp = FastMCP(
@@ -61,7 +62,7 @@ def inventory() -> Inventory:
 def _geocode(city: str):
     from geopy.geocoders import Nominatim
 
-    location = Nominatim(user_agent="little-mcp-evo").geocode(city, timeout=config.HTTP_TIMEOUT)
+    location = Nominatim(user_agent="little-mcp-evo").geocode(city, timeout=config.HTTP_TIMEOUT, language="en")
     if location is None:
         raise ValueError(f"City {city!r} not found.")
     return location
