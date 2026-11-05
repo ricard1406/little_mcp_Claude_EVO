@@ -103,7 +103,7 @@ class DocumentIndex:
         fp_path = self.index_dir / FINGERPRINT_FILE
         store = open_store()
         if not (fp_path.exists() and fp_path.read_text().strip() == current):
-            log.info("Building document index from %d file(s)...", len(files))
+            log.info("Indexing %d document(s) for search. This happens once, and again when they change...", len(files))
             from langchain_text_splitters import RecursiveCharacterTextSplitter
 
             chunks = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200).split_documents(
@@ -114,7 +114,7 @@ class DocumentIndex:
             if chunks:
                 store.add_documents(chunks)
             fp_path.write_text(current)
-            log.info("Indexed %d chunk(s).", len(chunks))
+            log.info("Document index ready (%d passages).", len(chunks))
         self._store, self._built_from = store, current
         return store
 

@@ -36,15 +36,44 @@ a tool you add to `server.py` shows up in the agent on the next start. And
 because it is real MCP, **Claude Desktop, Claude Code or any MCP client can
 use the same server** ([see below](#use-the-server-from-claude-desktop-or-claude-code)).
 
-## Quick start
+## Quick start (Ubuntu / Debian)
 
-You need Python 3.10+, and for the local model, [Ollama](https://ollama.com).
+### 1. Get the code
 
+A fresh Ubuntu doesn't include `git`, so install it first:
+
+```bash
+sudo apt install -y git
+```
 ```bash
 git clone https://github.com/ricard1406/little_mcp_Claude_EVO.git
 ```
 ```bash
 cd little_mcp_Claude_EVO
+```
+
+### 2. Install everything
+
+```bash
+./install.sh
+```
+
+The script asks for your password once, for the system packages. It's safe to
+run again. It does the following:
+- installs `curl` and Python's `venv` support,
+- creates the Python environment in `.venv` and installs the project,
+- creates your `.env` settings file from `.env.example`,
+- installs [Ollama](https://ollama.com) and downloads the two local models (a few GB).
+
+If you only want to chat with Claude, use `./install.sh --claude-only`. It
+still downloads the small `nomic-embed-text` model, because document search
+uses it even with Claude.
+
+<details>
+<summary>Prefer to do it by hand? Here are the same steps.</summary>
+
+```bash
+sudo apt install -y curl python3-venv
 ```
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
@@ -55,13 +84,9 @@ pip install -e ".[all]"
 ```bash
 cp .env.example .env
 ```
-
-Then edit `.env` and add the keys you want to use. Everything is optional:
-- `OPENWEATHER_API_KEY`: for weather ([free key](https://openweathermap.org/api))
-- `ANTHROPIC_API_KEY`: only if you use Claude
-
-Get the local models (skip the first one if you only use Claude):
-
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+```
 ```bash
 ollama pull qwen3:4b
 ```
@@ -69,7 +94,38 @@ ollama pull qwen3:4b
 ollama pull nomic-embed-text
 ```
 
-`nomic-embed-text` is used for document search, even when you chat with Claude.
+</details>
+
+### 3. Add your keys
+
+Open the settings file in a text editor:
+
+```bash
+nano .env
+```
+
+Fill in the keys you have, after the `=` with no spaces or quotes. Leave the others empty:
+
+```ini
+OPENWEATHER_API_KEY=paste-your-openweather-key-here
+ANTHROPIC_API_KEY=paste-your-anthropic-key-here
+```
+
+- `OPENWEATHER_API_KEY` turns on weather. Get a [free key](https://openweathermap.org/api).
+- `ANTHROPIC_API_KEY` is only needed for Claude. Get one in the [Claude Console](https://console.anthropic.com).
+
+In nano, save with `Ctrl+O` then `Enter`, and quit with `Ctrl+X`.
+
+### 4. Start chatting
+
+Each time you open a new terminal, activate the environment first:
+
+```bash
+source .venv/bin/activate
+```
+```bash
+python -m little_mcp
+```
 
 ## Run it
 

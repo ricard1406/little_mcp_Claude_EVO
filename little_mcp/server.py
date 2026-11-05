@@ -25,7 +25,8 @@ from .rag import DocumentIndex
 from .store import Inventory, Table
 
 # In stdio mode stdout carries the protocol, so logs must go to stderr.
-logging.basicConfig(level=logging.INFO, stream=sys.stderr, format="%(levelname)s %(name)s: %(message)s")
+# Short "[server]" lines, since they appear in the middle of the chat.
+logging.basicConfig(level=logging.INFO, stream=sys.stderr, format="  [server] %(message)s")
 for noisy in ("mcp", "httpx", "chromadb"):
     logging.getLogger(noisy).setLevel(logging.WARNING)
 log = logging.getLogger("little_mcp")
