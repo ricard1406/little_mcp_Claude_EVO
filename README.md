@@ -9,6 +9,12 @@ warehouse stock, using a local model (Ollama) or Claude.
 This is the next version of [Little_MCP](https://github.com/ricard1406/Little_MCP).
 See [CHANGELOG.md](CHANGELOG.md) for what changed and why.
 
+> **DISCLAIMER: All data in this project is sample data, for testing purposes only.
+> The names, locations and scores in the candidates list are fictional and AI generated.
+> Any resemblance to real persons, living or dead, or actual places is purely coincidental.**
+> AI answers can be wrong, and when you use Claude your questions and document passages
+> are sent to Anthropic. Read [DISCLAIMER.md](DISCLAIMER.md) before you use your own data.
+
 ```
 You: Do we have oranges in the warehouse?
   🛠️  find_item({"item": "orange"})
@@ -58,22 +64,28 @@ cd little_mcp_Claude_EVO
 ./install.sh
 ```
 
-The script asks for your password once, for the system packages. It's safe to
-run again. It does the following:
-- installs `curl` and Python's `venv` support,
-- creates the Python environment in `.venv` and installs the project,
-- creates your `.env` settings file from `.env.example`,
-- installs [Ollama](https://ollama.com) and downloads the two local models (a few GB).
+The script first lists what it can install, with download sizes. Then it **asks
+before each step**, so nothing is downloaded without your OK:
 
-If you only want to chat with Claude, use `./install.sh --claude-only`. It
-still downloads the small `nomic-embed-text` model, because document search
-uses it even with Claude.
+| Step | Size | Needed? |
+|---|---|---|
+| Python venv support (system package, asks for your password) | about 5 MB | yes |
+| Python libraries, in `./.venv` | about 200 MB download, 900 MB on disk | yes |
+| `.env` settings file | none | yes |
+| [Ollama](https://ollama.com), to run AI models locally | often more than 1 GB | only without Claude, or for document search |
+| `nomic-embed-text` model | about 270 MB | for document search |
+| `qwen3:4b` chat model | about 2.5 GB | only to chat without Claude |
+
+**With a Claude API key you can skip Ollama.** Everything works except
+searching your documents. Steps that are already done are skipped, so you can
+run the script again later, for example to add Ollama.
+`./install.sh --yes` accepts every step without asking.
 
 <details>
 <summary>Prefer to do it by hand? Here are the same steps.</summary>
 
 ```bash
-sudo apt install -y curl python3-venv
+sudo apt install -y --no-install-recommends python3-venv
 ```
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
@@ -83,6 +95,11 @@ pip install -e ".[all]"
 ```
 ```bash
 cp .env.example .env
+```
+Optional, for Ollama (skip these with a Claude API key):
+
+```bash
+sudo apt install -y curl
 ```
 ```bash
 curl -fsSL https://ollama.com/install.sh | sh
@@ -286,4 +303,4 @@ need no Ollama, no API key and no network.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT, provided "as is" without any warranty. See [LICENSE](LICENSE) and [DISCLAIMER.md](DISCLAIMER.md).
