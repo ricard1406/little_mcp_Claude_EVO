@@ -114,7 +114,7 @@ class DocumentIndex:
             if chunks:
                 store.add_documents(chunks)
             fp_path.write_text(current)
-            log.info("Document index ready (%d passages).", len(chunks))
+            log.info("Document index ready (%d passage%s).", len(chunks), "" if len(chunks) == 1 else "s")
         self._store, self._built_from = store, current
         return store
 

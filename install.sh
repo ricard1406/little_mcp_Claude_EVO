@@ -29,8 +29,12 @@ ask() {
     [[ ${reply,,} == y* || ${reply,,} == s* ]]  # yes / sì
 }
 
+APT_UPDATED=0
 apt_install() {
-    sudo apt-get update -q
+    if [[ $APT_UPDATED == 0 ]]; then
+        sudo apt-get update -q
+        APT_UPDATED=1
+    fi
     sudo apt-get install -y -q --no-install-recommends "$@"
 }
 
