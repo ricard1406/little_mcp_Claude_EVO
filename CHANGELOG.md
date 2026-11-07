@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.6.0 (EVO): first release
+## 0.6.0 (EVO): first release, 2026-11-07
 
 A rewrite of [Little_MCP](https://github.com/ricard1406/Little_MCP) 0.5.2.
 The features are the same; the architecture and safety are new.
@@ -12,6 +12,8 @@ The features are the same; the architecture and safety are new.
 - Claude Desktop, Claude Code and the MCP Inspector can use the server directly.
 - **One command** to start: the agent launches the server itself over stdio.
 - New MCP resource `docs://files` lists the searchable documents.
+- The server can run on another machine (HTTP, or SSH for untrusted networks).
+  The README has a step-by-step guide, tested between two machines.
 
 ### Safety
 - **No more raw SQL from the LLM.** The two SQL endpoints are replaced by four
