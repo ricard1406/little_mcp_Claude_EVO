@@ -206,6 +206,98 @@ claude mcp add little-mcp -- /full/path/to/little_mcp_Claude_EVO/.venv/bin/pytho
 
 Then ask Claude *"Do we have oranges in the warehouse?"*.
 
+## Use the server from another machine
+
+The server and the chat don't have to run on the same computer. For example,
+you can run the server on a desktop PC (with Ollama, your documents and the
+database) and chat from an affordable laptop, using Claude Code or Little MCP
+itself. It works the same way across two virtual machines.
+
+**What runs where:**
+- **The server machine** runs the tools. Its `.env` (weather key), its Ollama
+  (document search), its `data/` folder and its stock database are the ones used.
+- **The client machine** runs the chat: Claude Code, or `python -m little_mcp`
+  with Claude or its own Ollama model.
+
+### On the server machine
+
+1. Find its IP address (the first number is usually the one you need):
+
+   ```bash
+   hostname -I
+   ```
+
+2. Start the server so it listens on the network, not only on `127.0.0.1`.
+   Leave this terminal open:
+
+   ```bash
+   cd ~/little_mcp_Claude_EVO && source .venv/bin/activate && MCP_HOST=0.0.0.0 python -m little_mcp.server --transport http
+   ```
+
+3. Check the firewall:
+
+   ```bash
+   sudo ufw status
+   ```
+
+   If it says `Status: active`, the firewall silently blocks the connection.
+   Allow **only the client machine** (put its IP address in place of `CLIENT_IP`):
+
+   ```bash
+   sudo ufw allow from CLIENT_IP to any port 8000 proto tcp
+   ```
+
+### On the client machine
+
+Put the server's IP address in place of `SERVER_IP`.
+
+**Claude Code:**
+
+```bash
+claude mcp add --transport http little-mcp http://SERVER_IP:8000/mcp
+```
+```bash
+claude mcp get little-mcp
+```
+
+The second command should show `Status: ✔ Connected`. Then **start a new
+Claude Code session**, because MCP servers are loaded when a session starts.
+Claude Code asks your permission the first time it uses each tool.
+
+**Little MCP's own chat** (it needs the project installed on the client too):
+
+```bash
+python -m little_mcp --provider anthropic --server-url http://SERVER_IP:8000/mcp
+```
+
+### If it doesn't connect
+
+| What you see | Likely cause |
+|---|---|
+| `connection timed out` | The server machine's firewall: see step 3. |
+| `connection refused` | The server isn't running, or it was started without `MCP_HOST=0.0.0.0`. |
+| `ping SERVER_IP` fails too | The machines aren't on the same network. |
+
+### Security
+
+⚠️ **The server has no password.** Anything that can reach port 8000 can use
+every tool, including the ones that change the stock. Use this only on a network
+you trust, such as your home network or VMs on your own PC, and keep the firewall
+rule limited to the client's IP address. Remove the rule when you're done:
+
+```bash
+sudo ufw delete allow from CLIENT_IP to any port 8000 proto tcp
+```
+
+For a network you don't trust, run the server over SSH instead. That way
+nothing is opened to the network, and the connection is encrypted and needs
+your SSH login. It needs `openssh-server` on the server machine and an SSH key
+on the client (`ssh-keygen`, then `ssh-copy-id user@SERVER_IP`):
+
+```bash
+claude mcp add little-mcp -- ssh user@SERVER_IP /home/user/little_mcp_Claude_EVO/.venv/bin/python -m little_mcp.server
+```
+
 ## Your documents
 
 Put PDF, `.txt` or `.md` files in `data/`. They are indexed on the first
@@ -300,6 +392,7 @@ need no Ollama, no API key and no network.
 - **Weather tool says it is not configured**: set `OPENWEATHER_API_KEY` in `.env`.
 - **Ollama connection refused**: run `ollama serve`, and check `ollama list`.
 - **Small models ignore tools or loop**: try a bigger model (`--model qwen3:8b`), or Claude.
+- **Can't reach the server from another machine**: see [If it doesn't connect](#if-it-doesnt-connect).
 
 ## License
 
