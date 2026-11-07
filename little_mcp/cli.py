@@ -98,7 +98,7 @@ def _print_event(event, think: bool) -> None:
         print(f"\n  🛠️  {event.tool}({_short(event.args)})")
     elif event.kind == "tool_result":
         mark = "❌" if event.is_error else "↳"
-        print(f"  {mark} {_short(event.text)}")
+        print(f"  {mark} {event.tool}: {_short(event.text)}")
 
 
 def _banner(args, agent) -> None:
@@ -112,6 +112,26 @@ def _banner(args, agent) -> None:
 
 
 # --- Web UI -------------------------------------------------------------------------
+
+
+def add_to_chat(shown: list[dict], boxes: dict[str, int], event, think: bool) -> None:
+    """Add one agent event to the Gradio chat messages.
+
+    Each tool call gets a collapsible box. `boxes` maps a call id to its box,
+    so when several tools run at once, each result lands under its own call.
+    """
+    if event.kind == "answer":
+        shown.append({"role": "assistant", "content": event.text})
+    elif event.kind == "tool_call":
+        boxes[event.call_id] = len(shown)
+        shown.append({"role": "assistant", "content": f"`{_short(event.args)}`",
+                      "metadata": {"title": f"🛠️ {event.tool}"}})
+    elif event.kind == "tool_result":
+        i = boxes.get(event.call_id, len(shown) - 1)
+        if i >= 0:
+            shown[i]["content"] += f"\n\n{'❌' if event.is_error else '↳'} {_short(event.text, 800)}"
+    elif event.kind == "reasoning" and think:
+        shown.append({"role": "assistant", "content": event.text, "metadata": {"title": "💭 Reasoning"}})
 
 
 def run_graph(args, llm) -> None:
@@ -142,18 +162,11 @@ def run_graph(args, llm) -> None:
     async def respond(message: str, history, request: gr.Request):
         agent = await get_agent()
         shown: list[dict] = []
+        boxes: dict[str, int] = {}
         try:
             # One conversation per browser tab.
             async for event in agent.stream(message, thread_id=request.session_hash or "web"):
-                if event.kind == "answer":
-                    shown.append({"role": "assistant", "content": event.text})
-                elif event.kind == "tool_call":
-                    shown.append({"role": "assistant", "content": f"`{_short(event.args)}`",
-                                  "metadata": {"title": f"🛠️ {event.tool}"}})
-                elif event.kind == "tool_result" and shown:
-                    shown[-1]["content"] += f"\n\n{'❌' if event.is_error else '↳'} {_short(event.text, 800)}"
-                elif event.kind == "reasoning" and args.think:
-                    shown.append({"role": "assistant", "content": event.text, "metadata": {"title": "💭 Reasoning"}})
+                add_to_chat(shown, boxes, event, args.think)
                 yield shown
         except Exception as e:
             shown.append({"role": "assistant", "content": f"❌ {type(e).__name__}: {e}"})

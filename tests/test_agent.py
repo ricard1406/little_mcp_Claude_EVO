@@ -102,3 +102,16 @@ def test_server_gets_only_the_settings_it_needs(monkeypatch):
     assert "ANTHROPIC_API_KEY" not in env and "PS1" not in env
     assert env["OPENWEATHER_API_KEY"] == "weather-key"
     assert "PATH" in env
+
+
+async def test_parallel_tool_results_keep_their_call_ids():
+    both = AIMessage("", tool_calls=[
+        {"name": "find_item", "args": {"item": "apples"}, "id": "call_a", "type": "tool_call"},
+        {"name": "calculate", "args": {"expression": "4 * 6"}, "id": "call_b", "type": "tool_call"},
+    ])
+    llm = ScriptedModel(replies=[both, AIMessage("Done.")])
+    async with LittleAgent(llm) as agent:
+        events = [e async for e in agent.stream("Apples and 4*6?")]
+    results = {e.call_id: e for e in events if e.kind == "tool_result"}
+    assert results["call_a"].tool == "find_item" and "APPLES" in results["call_a"].text
+    assert results["call_b"].tool == "calculate" and results["call_b"].text.strip() == "24"

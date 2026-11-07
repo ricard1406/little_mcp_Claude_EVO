@@ -47,7 +47,7 @@ The features are the same; the architecture and safety are new.
 
 ### Project
 - Python package with `pyproject.toml` and optional extras: `claude`, `ui`, `mariadb`, `dev`.
-- A pytest suite of 39 tests that need no LLM or network.
+- A pytest suite of 42 tests that need no LLM or network.
 - Uses LangChain v1 (`create_agent`). `langchain-community` is no longer needed.
 - Guided `install.sh` for Ubuntu/Debian: it lists download sizes and asks before
   each step, and Ollama is optional.

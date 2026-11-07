@@ -129,6 +129,7 @@ class Event:
     tool: str = ""
     args: dict | None = None
     is_error: bool = False
+    call_id: str = ""  # links a tool_result to its tool_call (tools can run in parallel)
 
 
 _THINK_TAGS = re.compile(r"<think>.*?</think>", re.DOTALL)
@@ -233,12 +234,12 @@ class LittleAgent:
                         if reasoning := _reasoning(msg):
                             yield Event("reasoning", reasoning)
                         for call in msg.tool_calls:
-                            yield Event("tool_call", tool=call["name"], args=call["args"])
+                            yield Event("tool_call", tool=call["name"], args=call["args"], call_id=call.get("id") or "")
                         if not msg.tool_calls:
                             yield Event("answer", _answer(msg))
                     elif isinstance(msg, ToolMessage):
                         yield Event("tool_result", _tool_text(msg), tool=msg.name or "",
-                                    is_error=msg.status == "error")
+                                    is_error=msg.status == "error", call_id=msg.tool_call_id)
 
     async def chat(self, message: str, thread_id: str = "default") -> str:
         answer = ""
