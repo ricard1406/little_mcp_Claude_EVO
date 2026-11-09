@@ -23,21 +23,21 @@ dependencies = [
     "timezonefinder>=6",
     "requests>=2.31",
     "python-dotenv>=1.0",
+    "gradio>=6",
 ]
 
 [project.optional-dependencies]
 claude = ["langchain-anthropic>=1.7"]
-ui = ["gradio>=5"]
 mariadb = ["mariadb>=1.1"]
 dev = ["pytest>=8", "pytest-asyncio>=0.24"]
-all = ["little-mcp-evo[claude,ui,dev]"]
+all = ["little-mcp-evo[claude,dev]"]
 
 [project.scripts]
 little-mcp = "little_mcp.cli:main"
 little-mcp-server = "little_mcp.server:main"
 
 [tool.setuptools]
-packages = ["little_mcp"]
+packages = ["little_mcp", "little_mcp.tinysql"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

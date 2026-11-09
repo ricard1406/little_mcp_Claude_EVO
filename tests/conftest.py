@@ -5,9 +5,9 @@ from little_mcp.rag import DocumentIndex
 from little_mcp.store import Inventory
 
 
-@pytest.fixture
-def inventory(tmp_path):
-    return Inventory(backend="sqlite", sqlite_path=tmp_path / "store.db")
+@pytest.fixture(params=["tinysql", "sqlite"])
+def inventory(request, tmp_path):
+    return Inventory(backend=request.param, sqlite_path=tmp_path / "store.db", tinysql_dir=tmp_path / "tinysql")
 
 
 @pytest.fixture

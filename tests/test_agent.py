@@ -52,8 +52,9 @@ async def test_agent_discovers_tools_and_uses_them():
 async def test_writes_need_confirmation():
     asked = []
 
-    async def decline(tool, args):
+    async def decline(tool, args, thread_id):
         asked.append(tool)
+        assert thread_id == "the-chat"
         return False
 
     llm = ScriptedModel(replies=[
@@ -63,12 +64,12 @@ async def test_writes_need_confirmation():
         AIMessage("2 apples."),
     ])
     async with LittleAgent(llm, confirm=decline) as agent:
-        events = [e async for e in agent.stream("Add 5 apples")]
+        events = [e async for e in agent.stream("Add 5 apples", "the-chat")]
         assert asked == ["adjust_stock"]
         result = next(e for e in events if e.kind == "tool_result")
         assert result.is_error and "declined" in result.text
         # Read-only tools run without asking, and the stock really is unchanged.
-        events = [e async for e in agent.stream("How many apples?")]
+        events = [e async for e in agent.stream("How many apples?", "the-chat")]
         assert asked == ["adjust_stock"]
         assert '"quantity": 2' in next(e for e in events if e.kind == "tool_result").text
 
@@ -81,6 +82,37 @@ async def test_conversation_memory_is_per_thread():
         await agent.chat("What's my name?", thread_id="a")
     last_input = [m.content for m in llm.seen[-1] if m.type == "human"]
     assert last_input == ["I'm Ada", "What's my name?"]
+
+
+async def test_a_saved_conversation_is_remembered_after_a_restart():
+    llm = ScriptedModel(replies=[AIMessage("Your name is Ada"), AIMessage("Still Ada")], seen=[])
+    saved = [
+        {"kind": "user", "text": "I'm Ada"},
+        {"kind": "tool_call", "tool": "calculate", "text": ""},
+        {"kind": "tool_result", "text": "2"},
+        {"kind": "answer", "text": "Hi Ada"},
+    ]
+    async with LittleAgent(llm) as agent:
+        [e async for e in agent.stream("What's my name?", "old-chat", saved)]
+        [e async for e in agent.stream("And now?", "old-chat", saved)]  # put back only once
+    assert [m.content for m in llm.seen[0] if m.type != "system"] == ["I'm Ada", "Hi Ada", "What's my name?"]
+    humans = [m.content for m in llm.seen[1] if m.type == "human"]
+    assert humans == ["I'm Ada", "What's my name?", "And now?"]
+
+
+async def test_an_empty_answer_is_explained():
+    async with LittleAgent(ScriptedModel(replies=[AIMessage("")], seen=[])) as agent:
+        events = [e async for e in agent.stream("Hello")]
+    assert "ran out of room" in events[-1].text
+
+
+async def test_a_stopped_turn_is_rebuilt_from_the_saved_chat():
+    llm = ScriptedModel(replies=[AIMessage("one"), AIMessage("two")], seen=[])
+    async with LittleAgent(llm) as agent:
+        await agent.chat("first", "c")
+        await agent.forget("c")
+        [e async for e in agent.stream("second", "c", [{"kind": "user", "text": "saved"}])]
+    assert [m.content for m in llm.seen[-1] if m.type == "human"] == ["saved", "second"]
 
 
 def test_trimming_keeps_tool_calls_with_their_results():

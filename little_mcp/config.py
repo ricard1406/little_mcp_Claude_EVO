@@ -21,7 +21,11 @@ HTTP_TIMEOUT = float(os.getenv("HTTP_TIMEOUT", "10"))
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
 
-DB_BACKEND = os.getenv("DB_BACKEND", "sqlite").lower()
+# Saved conversations: one file per chat (see history.py).
+CHATS_DIR = Path(os.getenv("LITTLE_MCP_CHATS_DIR", DATA_DIR / "chats"))
+
+DB_BACKEND = os.getenv("DB_BACKEND", "tinysql").lower()
+TINYSQL_DIR = Path(os.getenv("TINYSQL_DIR", DATA_DIR / "tinysql"))
 SQLITE_PATH = Path(os.getenv("SQLITE_PATH", DATA_DIR / "mystore.db"))
 MARIADB = {
     "host": os.getenv("DB_HOST", "127.0.0.1"),

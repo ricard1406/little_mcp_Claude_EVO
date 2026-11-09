@@ -1,6 +1,6 @@
 import pytest
 
-from little_mcp.store import InventoryError
+from little_mcp.store import Inventory, InventoryError
 
 
 def test_demo_data_is_seeded(inventory):
@@ -39,3 +39,33 @@ def test_injection_is_just_a_name(inventory):
     with pytest.raises(InventoryError):
         inventory.set_quantity("FRUITS", "APPLES'; DROP TABLE FRUITS; --", 1)
     assert len(inventory.list_items("FRUITS")) == 5
+
+
+def test_tinysql_is_the_default(monkeypatch, tmp_path):
+    import importlib
+
+    from little_mcp import config
+
+    # Your own .env may choose another database, so it is ignored here.
+    monkeypatch.delenv("DB_BACKEND", raising=False)
+    monkeypatch.setattr("dotenv.load_dotenv", lambda *args, **kwargs: None)
+    try:
+        assert importlib.reload(config).DB_BACKEND == "tinysql"
+    finally:
+        monkeypatch.undo()
+        importlib.reload(config)
+
+
+def test_a_stock_change_is_not_lost_between_two_servers(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    one, two = Inventory("tinysql", tinysql_dir=tmp_path / "db"), Inventory("tinysql", tinysql_dir=tmp_path / "db")
+    with ThreadPoolExecutor(8) as pool:
+        list(pool.map(lambda i: (one if i % 2 else two).adjust_quantity("FRUITS", "APPLES", 1), range(40)))
+    assert one.find_item("APPLES")[0]["quantity"] == 42
+
+
+def test_a_number_too_long_for_its_column_is_a_clear_error(tmp_path):
+    inventory = Inventory("tinysql", tinysql_dir=tmp_path / "db")
+    with pytest.raises(InventoryError, match="too long"):
+        inventory.set_quantity("FRUITS", "APPLES", 10**12)

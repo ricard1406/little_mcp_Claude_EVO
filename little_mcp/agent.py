@@ -28,16 +28,21 @@ DEFAULT_CLAUDE_MODEL = "claude-opus-5-5"
 SYSTEM_PROMPT = """You are Little MCP, a helpful assistant for a small business.
 
 You have tools for the current date and time, the weather, exact arithmetic, \
-searching the user's local documents, and the warehouse inventory (tables FRUITS \
-and VEGGIE). Use a tool whenever the answer depends on live data, the user's \
+searching the user's local documents, the warehouse inventory (tables FRUITS \
+and VEGGIE), and a small SQL database called myTinySQL. Use a tool whenever the answer depends on live data, the user's \
 documents or the inventory, and do arithmetic with the calculate tool instead of \
 in your head. You do not know today's date unless you call get_datetime.
 
 When a question is about the user's documents, base the answer only on what \
 search_documents returns, and say so if the documents do not contain it.
 
-Before changing stock, make sure you have the exact item name (use find_item). \
-If the user declines a change, do not try it again.
+Before changing stock, make sure you have the exact item name (use find_item).
+
+When the user wants to keep a list or a table of their own (books, customers...), \
+use myTinySQL: tiny_sql_read to look at it and tiny_sql_write to create tables and \
+store rows. Store every item the user gave you, exactly as written, and send all \
+the statements in a single tiny_sql_write call. The user is asked to approve each \
+change. If the user declines a change, do not try it again.
 
 Answer in the user's language, briefly and clearly."""
 
@@ -67,8 +72,12 @@ def build_llm(provider: str, model: str | None = None, think: bool = False, effo
 
     from langchain_ollama import ChatOllama
 
-    # reasoning=True returns a thinking model's reasoning separately from the answer.
-    return ChatOllama(model=model or DEFAULT_OLLAMA_MODEL, temperature=0.1, reasoning=True if think else None)
+    # reasoning=True returns a thinking model's reasoning separately from the answer. Don't use
+    # reasoning=False to save time: qwen3:4b reasons anyway, and the reasoning lands in the answer.
+    # The tools take about 1800 tokens of the model's memory, and thinking takes thousands more:
+    # num_ctx gives it room, and num_predict stops an answer that never ends.
+    return ChatOllama(model=model or DEFAULT_OLLAMA_MODEL, temperature=0.1, reasoning=True if think else None,
+                      num_ctx=8192, num_predict=6000)
 
 
 # --- Middleware ---------------------------------------------------------------
@@ -102,17 +111,27 @@ class KeepRecentMessages(AgentMiddleware):
         return await handler(request.override(messages=self._trim(request.messages)))
 
 
-Confirm = Callable[[str, dict], Awaitable[bool]]
+Confirm = Callable[[str, dict, str], Awaitable[bool]]
+"""Asked before a tool changes data: (tool name, arguments, conversation id) -> allowed?"""
 
 
 DECLINED = "The user declined this change. Do not retry it."
+
+NO_ANSWER = ("The model ran out of room before it could answer. Try a shorter request, "
+             "a bigger model, or Claude (--provider anthropic).")
+
+
+def _thread_id(request) -> str:
+    """Which conversation a tool call belongs to: the UI needs it to ask in the right place."""
+    run_config = getattr(request.runtime, "config", None) or {}
+    return run_config.get("configurable", {}).get("thread_id", "default")
 
 
 def _confirm_writes(write_tools: set[str], confirm: Confirm, declined_message: str):
     """MCP tool interceptor: ask before running any tool that changes data."""
 
     async def interceptor(request, handler):
-        if request.name in write_tools and not await confirm(request.name, request.args):
+        if request.name in write_tools and not await confirm(request.name, request.args, _thread_id(request)):
             return CallToolResult(content=[TextContent(type="text", text=declined_message)], isError=True)
         return await handler(request)
 
@@ -124,7 +143,7 @@ def _confirm_writes(write_tools: set[str], confirm: Confirm, declined_message: s
 
 @dataclass
 class Event:
-    kind: str  # "reasoning" | "tool_call" | "tool_result" | "answer"
+    kind: str  # "user" | "reasoning" | "tool_call" | "tool_result" | "answer" | "error" | "confirm"
     text: str = ""
     tool: str = ""
     args: dict | None = None
@@ -158,7 +177,7 @@ def _tool_text(msg: ToolMessage) -> str:
 
 # Settings the server may need from the shell. Everything else (including the
 # Anthropic key) stays with the agent; the server also reads .env itself.
-_SERVER_ENV_PREFIXES = ("LITTLE_MCP_", "OPENWEATHER_", "DB_", "SQLITE_", "EMBED_", "OLLAMA_", "MCP_",
+_SERVER_ENV_PREFIXES = ("LITTLE_MCP_", "OPENWEATHER_", "DB_", "SQLITE_", "TINYSQL_", "EMBED_", "OLLAMA_", "MCP_",
                         "HTTP_TIMEOUT", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy",
                         "no_proxy")
 
@@ -169,6 +188,21 @@ def _server_env() -> dict[str, str]:
     env = get_default_environment()
     env.update({k: v for k, v in os.environ.items() if k.startswith(_SERVER_ENV_PREFIXES)})
     return env
+
+
+def _remembered(records: list[dict]) -> list:
+    """What the model is told about an old conversation: the questions and the answers.
+
+    Tool calls are left out: they would take up the memory of a small model, and
+    a provider refuses a tool call that is separated from its result.
+    """
+    messages = []
+    for record in records:
+        if record.get("kind") == "user":
+            messages.append(HumanMessage(record["text"]))
+        elif record.get("kind") == "answer" and record["text"]:
+            messages.append(AIMessage(record["text"]))
+    return messages
 
 
 # --- Agent ----------------------------------------------------------------------
@@ -187,6 +221,7 @@ class LittleAgent:
         self.tools = []
         self._stack = AsyncExitStack()
         self._graph = None
+        self._threads: set[str] = set()  # conversations already in the model's memory
 
     def _connection(self) -> dict:
         if self.server_url:
@@ -222,11 +257,21 @@ class LittleAgent:
     async def __aexit__(self, *exc):
         await self._stack.aclose()
 
-    async def stream(self, message: str, thread_id: str = "default") -> AsyncIterator[Event]:
-        """Run one user turn and yield what happens: reasoning, tool calls, results, answer."""
+    async def stream(self, message: str, thread_id: str = "default",
+                     earlier: list[dict] | None = None) -> AsyncIterator[Event]:
+        """Run one user turn and yield what happens: reasoning, tool calls, results, answer.
+
+        `earlier` holds the saved records of a conversation from a previous run.
+        The agent's memory does not survive a restart, so they are put back the
+        first time this conversation is used.
+        """
         config_ = {"configurable": {"thread_id": thread_id}, "recursion_limit": 50}
+        messages = [HumanMessage(message)]
+        if thread_id not in self._threads:
+            self._threads.add(thread_id)
+            messages[:0] = _remembered(earlier or [])
         async for update in self._graph.astream(
-            {"messages": [HumanMessage(message)]}, config_, stream_mode="updates"
+            {"messages": messages}, config_, stream_mode="updates"
         ):
             for node_output in update.values():
                 for msg in (node_output or {}).get("messages", []):
@@ -236,10 +281,19 @@ class LittleAgent:
                         for call in msg.tool_calls:
                             yield Event("tool_call", tool=call["name"], args=call["args"], call_id=call.get("id") or "")
                         if not msg.tool_calls:
-                            yield Event("answer", _answer(msg))
+                            yield Event("answer", _answer(msg) or NO_ANSWER)
                     elif isinstance(msg, ToolMessage):
                         yield Event("tool_result", _tool_text(msg), tool=msg.name or "",
                                     is_error=msg.status == "error", call_id=msg.tool_call_id)
+
+    async def forget(self, thread_id: str) -> None:
+        """Clear a conversation from the model's memory, after a turn that was stopped or failed.
+
+        Such a turn can leave a tool call without its result, which a provider refuses. The
+        next message rebuilds the conversation from the saved chat instead.
+        """
+        await self._graph.checkpointer.adelete_thread(thread_id)
+        self._threads.discard(thread_id)
 
     async def chat(self, message: str, thread_id: str = "default") -> str:
         answer = ""

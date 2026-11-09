@@ -152,6 +152,7 @@ Next:
   1. Add your keys:           nano .env
   2. Activate the project:    source .venv/bin/activate
   3. Start chatting:          $start
+  4. Open in your browser:    http://127.0.0.1:7860
 
 Please read DISCLAIMER.md: it explains the sample data and where your data goes.
 EOF

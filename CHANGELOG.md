@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- **myTinySQL is now the default database.** A Python port of the Rust version, in
+  `little_mcp/tinysql/`, with one file per Rust module. It passes the same 8 golden
+  scripts as C++ and Rust, and reads and writes the same files.
+- **New tools `tiny_sql_read` and `tiny_sql_write`:** the model can create tables and
+  store rows by writing SQL, and your own parser decides what can run. Write scripts
+  are all-or-nothing.
+- **The web UI is now the default.** `python -m little_mcp text` starts the terminal chat.
+  Gradio is now a required dependency, and the `ui` extra is gone.
+- **The web UI asks before changing data**, with Allow and Decline buttons and the whole
+  change on screen. Before, it could only block changes or allow them all.
+- The web UI counts the seconds while the model works, and has a **Stop** button.
+- **Chat history:** every conversation is saved in `data/chats/`. The web UI lists them,
+  and you can open an old chat and carry on, even after a restart.
+- The terminal shows the whole change before asking, instead of a shortened version.
+- Stock changes on myTinySQL hold a file lock, so two servers cannot overwrite each other.
+
 ## 0.6.0 (EVO): first release, 2026-11-07
 
 A rewrite of [Little_MCP](https://github.com/ricard1406/Little_MCP) 0.5.2.

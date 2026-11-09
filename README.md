@@ -4,7 +4,9 @@ A small AI agent that runs on your machine, built on a **real
 [Model Context Protocol](https://modelcontextprotocol.io) server**.
 
 Ask it about the weather, the time anywhere, your own documents or your
-warehouse stock, using a local model (Ollama) or Claude.
+warehouse stock, or have it keep tables of your own, using a local model
+(Ollama) or Claude. The tables live in **myTinySQL**, a small SQL database
+written in readable Python, included in this project.
 
 This is the next version of [Little_MCP](https://github.com/ricard1406/Little_MCP).
 See [CHANGELOG.md](CHANGELOG.md) for what changed and why.
@@ -34,6 +36,7 @@ Assistant: Yes, there are 3 oranges in stock.
  │  get_datetime   get_weather   calculate                  │
  │  search_documents (your PDFs)                            │
  │  list_inventory  find_item  adjust_stock  set_stock      │
+ │  tiny_sql_read  tiny_sql_write (myTinySQL)               │
  └──────────────────────────────────────────────────────────┘
 ```
 
@@ -144,14 +147,16 @@ source .venv/bin/activate
 python -m little_mcp
 ```
 
+Then open http://127.0.0.1:7860 in your browser.
+
 ## Run it
 
 **One command.** The agent starts the MCP server for you; there's no second terminal.
 
 | Command | What it does |
 |---|---|
-| `python -m little_mcp` | Chat in the terminal with the local model |
-| `python -m little_mcp graph` | Web UI at http://127.0.0.1:7860 |
+| `python -m little_mcp` | Web UI at http://127.0.0.1:7860, with the local model |
+| `python -m little_mcp text` | Chat in the terminal instead |
 | `python -m little_mcp --provider anthropic` | Use Claude (default model `claude-opus-5-5`) |
 | `python -m little_mcp --think` | Also show the model's reasoning and every tool call |
 | `python -m little_mcp --model llama3.2` | Use another Ollama (or Claude) model |
@@ -159,15 +164,25 @@ python -m little_mcp
 
 Flags can be combined. `python -m little_mcp --help` lists them all.
 
-### Changing the inventory is always your call
+### Changing your data is always your call
 
-`adjust_stock` and `set_stock` change data, and the server marks them as such
-(MCP tool annotations). The agent reads that and:
+`adjust_stock`, `set_stock` and `tiny_sql_write` change data, and the server
+marks them as such (MCP tool annotations). Before each change, the agent shows
+you all of it and asks:
 
-- in the **terminal**, asks you `Allow adjust_stock(...)? [y/N]` before each change;
-- in the **web UI**, blocks changes unless you start it with `--allow-writes`.
+- in the **web UI**, with **Allow** and **Decline** buttons under the chat;
+- in the **terminal**, with `Allow tiny_sql_write? [y/N]`.
 
-`--allow-writes` in the terminal skips the question.
+`--allow-writes` skips the question.
+
+### Chat history
+
+Every conversation is saved, in the web UI and in the terminal. The web UI lists
+them on the left: click one to read it and carry on, or start a **New chat**. The
+agent remembers the questions and answers of an old chat, but not its tool calls.
+
+Each chat is a plain text file in `data/chats/`, which git ignores. To forget a
+chat, delete its file.
 
 ### Run the server on its own
 
@@ -304,14 +319,46 @@ Put PDF, `.txt` or `.md` files in `data/`. They are indexed on the first
 search, and **re-indexed automatically when you add, change or delete a
 file**. The index lives in `.index/`, and you can delete it any time.
 
-## The warehouse database
+## The database: myTinySQL
 
-By default the inventory is a small SQLite database (`data/mystore.db`),
-created with demo data the first time you use it, so there's nothing to set up.
+The default database is **myTinySQL**, in [`little_mcp/tinysql/`](little_mcp/tinysql/).
+It is a Python port of [myTinySQL in Rust](https://github.com/ricard1406/myTinySql-rust),
+itself a port of [the C++ version](https://github.com/ricard1406/myTinySql): the
+same statements, the same messages and the same files on disk. Your tables are
+in `data/tinysql/`, one fixed-width text file each, and all three programs can
+read them. [docs/rust-vs-python.md](docs/rust-vs-python.md) compares the code.
 
-The agent never writes SQL. It can only call the four inventory tools, which
-run fixed, parameterized queries on the `FRUITS` and `VEGGIE` tables. Prompt
-injection or a confused model can't drop a table or read another one.
+You can use it without the AI:
+
+```bash
+python -m little_mcp.tinysql --data=data/tinysql
+```
+
+### Your own tables
+
+Just ask, in plain words: *"I got some books, please create a table and store
+them"*, followed by the list. The model writes the SQL, and the two tools
+decide what can run:
+
+- `tiny_sql_read` runs only `SELECT` and `DESCRIBE`, without asking you.
+- `tiny_sql_write` runs `CREATE TABLE`, `INSERT`, `UPDATE` and `DELETE`, after you
+  approve them. A script is all-or-nothing: if one statement fails, nothing changes.
+
+Your own parser reads every statement, so "what can run" is decided by the kind
+of statement, not by looking at the text. The dialect is small on purpose, for
+now: there is no `AND`, `ORDER BY`, `COUNT`, `JOIN` or `DROP TABLE`. The model
+gets an error message saying what isn't supported, and can work around it.
+
+### The warehouse
+
+The inventory (`FRUITS` and `VEGGIE`) is created with demo data the first time
+you use it, so there's nothing to set up. Its four tools don't use SQL text at
+all: they build statements as Python objects, so a name like `x'; DROP` is only
+ever a value. The tools work on those two tables and nothing else.
+
+To use another database for the inventory, set `DB_BACKEND` in `.env` to `sqlite`
+(`data/mystore.db`, also with no setup) or `mariadb`. The two `tiny_sql` tools
+always use myTinySQL.
 
 <details>
 <summary><b>Use MariaDB instead</b></summary>
@@ -366,12 +413,15 @@ new tool. For a tool that changes data, use
 little_mcp/
   server.py      the MCP server and all its tools
   agent.py       the agent: LLM + tools discovered over MCP
-  cli.py         terminal chat and web UI
+  cli.py         web UI and terminal chat
+  history.py     saved conversations
   rag.py         document index with change detection
-  store.py       inventory database (SQLite / MariaDB)
+  store.py       inventory database (myTinySQL / SQLite / MariaDB)
+  tinysql/       myTinySQL: one Python file per Rust module
   calculator.py  safe arithmetic
   config.py      settings from .env
-data/            your documents (and the demo SQLite database)
+data/            your documents, your tables (tinysql/) and your chats (chats/)
+docs/            myTinySQL: Rust compared with Python
 tests/           pytest suite (no LLM or network needed)
 ```
 
@@ -382,8 +432,9 @@ pytest
 ```
 
 The suite covers the calculator, the database (including SQL injection
-attempts), the document index, the server over the real MCP protocol, and the
-whole agent loop. A scripted fake model stands in for the LLM, so the tests
+attempts), myTinySQL (with the same 8 test scripts as the C++ and Rust
+versions), the chat history, the document index, the server over the real MCP
+protocol, and the whole agent loop. A scripted fake model stands in for the LLM, so the tests
 need no Ollama, no API key and no network.
 
 ## Troubleshooting
@@ -392,6 +443,7 @@ need no Ollama, no API key and no network.
 - **Weather tool says it is not configured**: set `OPENWEATHER_API_KEY` in `.env`.
 - **Ollama connection refused**: run `ollama serve`, and check `ollama list`.
 - **Small models ignore tools or loop**: try a bigger model (`--model qwen3:8b`), or Claude.
+- **The page says "Working..." for a long time**: without a graphics card a local model is slow, and `qwen3:4b` always thinks at length before it acts. On 2 CPU cores, storing a dozen rows can take over half an hour. Press **Stop**, or use Claude (`--provider anthropic`).
 - **Can't reach the server from another machine**: see [If it doesn't connect](#if-it-doesnt-connect).
 
 ## License

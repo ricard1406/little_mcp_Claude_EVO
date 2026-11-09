@@ -23,6 +23,7 @@ from mcp.types import ToolAnnotations
 from . import calculator, config
 from .rag import DocumentIndex
 from .store import Inventory, Table
+from .tinysql import Database
 
 # In stdio mode stdout carries the protocol, so logs must go to stderr.
 # Short "[server]" lines, since they appear in the middle of the chat.
@@ -35,8 +36,9 @@ mcp = FastMCP(
     "little-mcp",
     instructions=(
         "Tools for a small business assistant: current time and weather for a city, "
-        "arithmetic, search over the user's local documents, and a warehouse inventory "
-        "with the tables FRUITS and VEGGIE."
+        "arithmetic, search over the user's local documents, a warehouse inventory "
+        "with the tables FRUITS and VEGGIE, and a small SQL database (myTinySQL) "
+        "where the user can keep tables of their own."
     ),
     host=config.MCP_HOST,
     port=config.MCP_PORT,
@@ -47,6 +49,7 @@ READ_ONLY_WEB = ToolAnnotations(readOnlyHint=True, openWorldHint=True)
 
 _docs = DocumentIndex()
 _inventory: Inventory | None = None
+_database: Database | None = None
 
 
 def inventory() -> Inventory:
@@ -55,6 +58,13 @@ def inventory() -> Inventory:
     if _inventory is None:
         _inventory = Inventory()
     return _inventory
+
+
+def database() -> Database:
+    global _database
+    if _database is None:
+        _database = Database(config.TINYSQL_DIR)
+    return _database
 
 
 # --- Time and weather ---------------------------------------------------------
@@ -204,6 +214,64 @@ def set_stock(table: Table, item: str, quantity: int) -> dict:
     Prefer adjust_stock when the user describes a change ("add 3", "sold 2").
     """
     return inventory().set_quantity(table, item, quantity)
+
+
+# --- myTinySQL ----------------------------------------------------------------
+#
+# Here the model writes real SQL, in myTinySQL's small dialect. Your own parser
+# reads every statement, and each tool runs only the kinds it allows. There are
+# two tools so that MCP clients can see which one changes data, and ask first.
+
+
+@mcp.tool(annotations=READ_ONLY)
+def tiny_sql_read(sql: str) -> dict:
+    """Read the user's own tables in the myTinySQL database. Only SELECT and DESCRIBE.
+
+    Grammar (one statement per line):
+      DESCRIBE                     list the tables
+      DESCRIBE <table>             list the columns of a table
+      SELECT * FROM <table>
+      SELECT <col>,<col> FROM <table> WHERE <col> <op> 'value'
+
+    <op> is = != < <= > >= or LIKE (LIKE ignores case; % is any text, _ one letter).
+    A number compares as a number. WHERE takes one condition. There is no AND,
+    OR, ORDER BY, COUNT or JOIN: read the rows and work out the rest yourself.
+
+    Args:
+        sql: One or more statements, one per line.
+    """
+    return database().read(sql)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False))
+def tiny_sql_write(sql: str) -> dict:
+    """Create tables and change rows in the user's myTinySQL database.
+
+    Grammar (one whole statement per line, never split a statement over lines):
+      CREATE TABLE <table> (ID NUMBER(10), <col> CHAR(<width>), <col> NUMBER(<width>))
+      INSERT INTO <table> VALUES ('text', 'text')
+      UPDATE <table> SET <col> = 'value' WHERE <col> <op> 'value'
+      DELETE FROM <table> WHERE <col> <op> 'value'
+
+    Rules:
+    - A first column called ID is numbered automatically: leave it out of INSERT.
+    - Names: up to 20 letters, digits, _ or -, starting with a letter.
+    - Only CHAR and NUMBER exist. Use NUMBER only for plain whole numbers, and
+      CHAR for anything else (for example a period like '1840-1842').
+    - Widths are in bytes and a longer value is refused, so be generous, for
+      example CHAR(100) for a title. An accented letter takes 2 bytes or more.
+    - Put text in single quotes. Write an apostrophe at the start or end of a
+      word twice, as in 'Ca'' Foscari'.
+    - One row per INSERT. UPDATE and DELETE always need a WHERE with one condition.
+    - A table cannot be dropped or altered.
+
+    The whole script is all-or-nothing: if one statement fails, nothing is
+    changed. Fix the problem and send the whole script again.
+
+    Args:
+        sql: The statements, one per line.
+    """
+    return database().write(sql)
 
 
 # --- Entry point --------------------------------------------------------------

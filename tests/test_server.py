@@ -6,11 +6,13 @@ import pytest
 from mcp.shared.memory import create_connected_server_and_client_session
 
 from little_mcp import server
+from little_mcp.tinysql import Database
 
 
 @pytest.fixture(autouse=True)
-def isolated(monkeypatch, inventory, doc_index):
+def isolated(monkeypatch, tmp_path, inventory, doc_index):
     monkeypatch.setattr(server, "_inventory", inventory)
+    monkeypatch.setattr(server, "_database", Database(tmp_path / "user-tables"))
     monkeypatch.setattr(server, "_docs", doc_index)
 
 
@@ -28,9 +30,10 @@ async def test_tools_are_discoverable():
     async with connect() as session:
         tools = {t.name: t for t in (await session.list_tools()).tools}
         assert set(tools) == {"get_datetime", "get_weather", "calculate", "search_documents",
-                              "list_inventory", "find_item", "adjust_stock", "set_stock"}
+                              "list_inventory", "find_item", "adjust_stock", "set_stock",
+                              "tiny_sql_read", "tiny_sql_write"}
         writes = {name for name, t in tools.items() if not t.annotations.readOnlyHint}
-        assert writes == {"adjust_stock", "set_stock"}
+        assert writes == {"adjust_stock", "set_stock", "tiny_sql_write"}
         assert tools["list_inventory"].inputSchema["properties"]["table"]["enum"] == ["FRUITS", "VEGGIE"]
 
 
@@ -85,3 +88,47 @@ async def test_document_list_resource():
     async with connect() as session:
         resource = await session.read_resource("docs://files")
         assert resource.contents[0].text == "candidates.txt"
+
+
+BOOKS = [
+    ("Operette morali", "Giacomo Leopardi", "1835"),
+    ("I Promessi Sposi", "Alessandro Manzoni", "1840-1842"),
+    ("Confessioni di un italiano", "Ippolito Nievo", "1867"),
+    ("Giacinta", "Luigi Capuana", "1879"),
+    ("I Malavoglia", "Giovanni Verga", "1881"),
+    ("Malombra", "Antonio Fogazzaro", "1881"),
+    ("Pinocchio", "Carlo Collodi", "1883"),
+    ("Il ventre di Napoli", "Matilde Serao", "1884"),
+    ("La vergine delle rocce", "Gabriele D’Annunzio", "1885"),
+    ("Cuore", "Edmondo De Amicis", "1886"),
+    ("Il Piacere", "Gabriele D’Annunzio", "1889"),
+    ("Mastro-don Gesualdo", "Giovanni Verga", "1889"),
+]
+
+
+async def test_the_books_of_the_project_brief_can_be_stored():
+    script = "CREATE TABLE BOOKS (ID NUMBER(10), TITLE CHAR(100), AUTHOR CHAR(60), YEAR CHAR(20))\n" + "\n".join(
+        f"INSERT INTO BOOKS VALUES ('{title}', '{author}', '{year}')" for title, author, year in BOOKS
+    )
+    async with connect() as session:
+        written = await session.call_tool("tiny_sql_write", {"sql": script})
+        assert not written.isError, written.content[0].text
+        rows = data(await session.call_tool("tiny_sql_read", {"sql": "SELECT TITLE,AUTHOR,YEAR FROM BOOKS"}))
+        assert [tuple(r) for r in rows["results"][0]["rows"]] == BOOKS
+        found = data(await session.call_tool("tiny_sql_read", {"sql": "SELECT TITLE FROM BOOKS WHERE AUTHOR LIKE '%annunzio%'"}))
+        assert found["results"][0]["rows"] == [["La vergine delle rocce"], ["Il Piacere"]]
+
+
+async def test_the_read_tool_cannot_change_anything():
+    async with connect() as session:
+        await session.call_tool("tiny_sql_write", {"sql": "CREATE TABLE T (ID NUMBER(10), N CHAR(5))"})
+        result = await session.call_tool("tiny_sql_read", {"sql": "SELECT * FROM T\nDELETE FROM T WHERE ID = 1"})
+        assert result.isError and "tiny_sql_write" in result.content[0].text
+
+
+async def test_a_failed_write_tells_the_model_what_to_fix():
+    async with connect() as session:
+        result = await session.call_tool("tiny_sql_write", {"sql": "CREATE TABLE T (ID NUMBER(10), N CHAR(2))\nINSERT INTO T VALUES ('too long')"})
+        assert result.isError and "too long" in result.content[0].text and "Nothing was changed" in result.content[0].text
+        described = data(await session.call_tool("tiny_sql_read", {"sql": "DESCRIBE"}))
+        assert [r[0] for r in described["results"][0]["rows"]] == ["SYSTEM_TABLE"]

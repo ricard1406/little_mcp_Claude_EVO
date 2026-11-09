@@ -37,6 +37,9 @@ If you add your own documents to `data/` and use Claude, passages from them
 can be sent to Anthropic. **Don't put personal or confidential documents
 there unless you are allowed to share them in this way.**
 
+Your conversations are saved as plain text on your computer, in `data/chats/`, so
+anyone who can read that folder can read them. Delete a file to forget that chat.
+
 ## Third-party software and models
 
 `install.sh` asks before downloading anything. If you accept, it downloads
