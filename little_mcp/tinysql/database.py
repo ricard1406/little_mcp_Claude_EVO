@@ -58,6 +58,20 @@ def empty_catalog() -> bytes:
     return "".join(lines).encode()
 
 
+def only_inserts(script: str) -> bool:
+    """Tells whether a script only adds rows: every statement in it is an INSERT.
+
+    A client can use it to ask the user less often: a new row changes no existing
+    data, and a DELETE takes it out again. The parser decides, as everywhere else,
+    so a DELETE hidden after a `;` or a line break makes the answer False.
+    """
+    try:
+        statements = [parse_statement(sql) for sql in split_statements(script)]
+    except SqlError:
+        return False
+    return bool(statements) and all(isinstance(statement, InsertStmt) for statement in statements)
+
+
 class Database:
     """One myTinySQL database (a folder of files), safe to share between tools and servers."""
 

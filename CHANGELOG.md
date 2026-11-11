@@ -12,6 +12,8 @@
   Gradio is now a required dependency, and the `ui` extra is gone.
 - **The web UI asks before changing data**, with Allow and Decline buttons and the whole
   change on screen. Before, it could only block changes or allow them all.
+- **Ask less often:** "Ask before changes" in the web UI, and `--ask` on the command line.
+  With "Not for new rows", a script of `INSERT`s runs without the Allow question.
 - The web UI counts the seconds while the model works, and has a **Stop** button.
 - **Chat history:** every conversation is saved in `data/chats/`. The web UI lists them,
   and you can open an old chat and carry on, even after a restart.

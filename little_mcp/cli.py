@@ -16,6 +16,7 @@ from collections import defaultdict
 from . import __version__
 from .agent import DEFAULT_CLAUDE_MODEL, DEFAULT_OLLAMA_MODEL, Event, LittleAgent, build_llm
 from .history import ChatHistory
+from .tinysql.database import only_inserts
 
 EXAMPLES = [
     "What time is it in Tokyo, and what's the weather there?",
@@ -31,6 +32,13 @@ EXAMPLES = [
 
 CONFIRM_TIMEOUT = 600  # seconds: with nobody at the page, a change is declined
 
+# When to ask before a tool changes data: the --ask option, and the choice in the web page.
+ASK_CHOICES = {
+    "always": "Always",
+    "except-inserts": "Not for new rows",
+    "never": "Never",
+}
+
 
 def parse_args(argv=None):
     p = argparse.ArgumentParser(prog="little_mcp", description="Little MCP agent",
@@ -45,9 +53,18 @@ def parse_args(argv=None):
                    help="Claude only: how much effort to spend per answer (default: medium)")
     p.add_argument("--server-url", help="connect to an MCP server already running over HTTP,\n"
                                         "e.g. http://127.0.0.1:8000/mcp (default: start one automatically)")
-    p.add_argument("--allow-writes", action="store_true", help="change the data without asking first")
+    p.add_argument("--ask", choices=list(ASK_CHOICES), default="always",
+                   help="when to ask before changing data:\n"
+                        "always: before every change (default)\n"
+                        "except-inserts: not for an INSERT, which only adds rows\n"
+                        "never: change the data without asking\n"
+                        "(the web UI starts with this choice, and you can change it there)")
+    p.add_argument("--allow-writes", action="store_true", help="the same as --ask never")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    return p.parse_args(argv)
+    args = p.parse_args(argv)
+    if args.allow_writes:
+        args.ask = "never"
+    return args
 
 
 def _short(value, limit=300) -> str:
@@ -65,17 +82,29 @@ def describe_change(args: dict) -> str:
     return json.dumps(args, ensure_ascii=False, indent=2)
 
 
+def needs_question(ask: str, tool: str, args: dict) -> bool:
+    """Tells whether a change must wait for the user's OK, given the "ask" setting.
+
+    With "except-inserts", only a tiny_sql_write script made of INSERTs alone runs
+    without a question. Creating a table still asks, because a table cannot be
+    dropped yet; so do UPDATE, DELETE and the stock tools, which change existing data.
+    """
+    if ask == "never":
+        return False
+    if ask == "except-inserts" and tool == "tiny_sql_write":
+        return not only_inserts(str(args.get("sql", "")))
+    return True
+
+
 async def _ask_in_terminal(tool: str, args: dict, thread_id: str) -> bool:
     answer = await asyncio.to_thread(input, f"\n  ⚠️  Allow {tool}?\n{describe_change(args)}\n[y/N] ")
     return answer.strip().lower() in ("y", "yes", "s", "si", "sì")
 
 
-async def _always_yes(tool: str, args: dict, thread_id: str) -> bool:
-    return True
-
-
 async def run_text(args, llm) -> None:
-    confirm = _always_yes if args.allow_writes else _ask_in_terminal
+    async def confirm(tool: str, args_: dict, thread_id: str) -> bool:
+        return not needs_question(args.ask, tool, args_) or await _ask_in_terminal(tool, args_, thread_id)
+
     history = ChatHistory()
     chat_id = history.new_id()
     async with LittleAgent(llm, args.server_url, confirm, trim_history=args.provider == "ollama") as agent:
@@ -171,10 +200,13 @@ def run_graph(args, llm) -> None:
     queues: dict[str, asyncio.Queue] = {}  # chat id -> what its running turn wants to show
     answers: dict[str, asyncio.Future] = {}  # chat id -> the Allow / Decline click it waits for
     turns: dict[str, asyncio.Task] = {}  # chat id -> its running turn, for the Stop button
+    asking: dict[str, str] = {}  # chat id -> the "Ask before changes" choice when its turn started
     one_question: defaultdict[str, asyncio.Lock] = defaultdict(asyncio.Lock)  # for tools running in parallel
 
     async def ask_in_browser(tool: str, args_: dict, chat_id: str) -> bool:
         """Show the Allow / Decline panel, and wait for a click. The agent is paused meanwhile."""
+        if not needs_question(asking.get(chat_id, args.ask), tool, args_):
+            return True
         async with one_question[chat_id]:
             answers[chat_id] = asyncio.get_running_loop().create_future()
             await queues[chat_id].put(Event("confirm", tool=tool, args=args_))
@@ -189,8 +221,7 @@ def run_graph(args, llm) -> None:
         # Created inside Gradio's event loop, which is where the MCP session must live.
         async with lock:
             if "agent" not in agent_holder:
-                confirm = _always_yes if args.allow_writes else ask_in_browser
-                agent = LittleAgent(llm, args.server_url, confirm, trim_history=args.provider == "ollama")
+                agent = LittleAgent(llm, args.server_url, ask_in_browser, trim_history=args.provider == "ollama")
                 agent_holder["agent"] = await agent.__aenter__()
         return agent_holder["agent"]
 
@@ -207,6 +238,9 @@ def run_graph(args, llm) -> None:
             with gr.Column(scale=1, min_width=220):
                 new_chat = gr.Button("➕ New chat", variant="primary")
                 past = gr.Radio(label="Chat history", choices=[], interactive=True, elem_id="chat-history")
+                ask_when = gr.Radio(label="Ask before changes", value=args.ask, interactive=True,
+                                    choices=[(label, value) for value, label in ASK_CHOICES.items()],
+                                    info="\"Not for new rows\" lets an INSERT run without the question.")
 
             with gr.Column(scale=4, min_width=420):
                 chatbot = gr.Chatbot(height="55vh", label="Conversation", show_label=False)
@@ -233,12 +267,13 @@ def run_graph(args, llm) -> None:
             return {message: enabled, send: enabled, new_chat: enabled, past: enabled,
                     stop: gr.update(interactive=is_busy)}
 
-        async def respond(text: str, current: str):
+        async def respond(text: str, current: str, ask_choice: str):
             text = text.strip()
             if not text:
                 yield {message: gr.update()}
                 return
             current = current or history.new_id()
+            asking[current] = ask_choice
             earlier = history.load(current)
             shown = replay(earlier)
             boxes: dict[str, int] = {}
@@ -322,7 +357,7 @@ def run_graph(args, llm) -> None:
         def start_new_chat():
             return "", [], past_chats()
 
-        gr.on([message.submit, send.click], respond, [message, chat_id],
+        gr.on([message.submit, send.click], respond, [message, chat_id, ask_when],
               [message, send, stop, new_chat, past, chatbot, chat_id, confirm_panel, change, status],
               concurrency_limit=4)
         stop.click(click_stop, [chat_id], None, concurrency_limit=None)

@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from little_mcp.tinysql import Database, Session, SqlError
-from little_mcp.tinysql.database import empty_catalog
+from little_mcp.tinysql.database import empty_catalog, only_inserts
 from little_mcp.tinysql.output import fit, render_text
 from little_mcp.tinysql.parser import Quoted, Word, parse_statement, split_statements, tokenize
 from little_mcp.tinysql.statement import ColumnItem, Literal, Operator, SelectStmt
@@ -160,6 +160,21 @@ def test_a_write_answers_briefly(db):
     answer = db.write("CREATE TABLE T (ID NUMBER(10), N CHAR(5))\nINSERT INTO T VALUES ('Ada')")
     assert answer == {"done": 2, "messages": ["table T created with 2 columns (row length 15)",
                                               "1 row inserted into T with ID 1"]}
+
+
+@pytest.mark.parametrize("script, expected", [
+    ("INSERT INTO T VALUES ('a')", True),
+    ("insert into T values ('a');\nINSERT INTO T VALUES ('b; DELETE FROM T WHERE ID = 1')", True),
+    ("INSERT INTO T VALUES ('a'); DELETE FROM T WHERE ID = 1", False),
+    ("INSERT INTO T VALUES ('a')\nDELETE FROM T WHERE ID = 1", False),
+    ("CREATE TABLE T (ID NUMBER(10))", False),
+    ("SELECT * FROM T", False),
+    ("INSERT INTO", False),
+    ("REM nothing here", False),
+    ("", False),
+])
+def test_only_inserts(script, expected):
+    assert only_inserts(script) is expected
 
 
 def test_write_refuses_reads(db):

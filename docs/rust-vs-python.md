@@ -30,7 +30,7 @@ messages and the same files on disk. Only the language changes.
 | `output.rs` | `output.py` | 169 → 37 | No JSON: there is no browser server |
 | `server.rs` | (none) | 287 → 0 | The engine lives inside the MCP server, so it needs no port of its own |
 | `main.rs` | `__main__.py` | 210 → 68 | Without the server options |
-| (none) | `database.py` | 0 → 160 | Only in Python, see section 7 |
+| (none) | `database.py` | 0 → 174 | Only in Python, see section 7 |
 
 ## 1. `enum` and `match` → dataclasses and `match`
 

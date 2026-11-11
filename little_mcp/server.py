@@ -263,7 +263,8 @@ def tiny_sql_write(sql: str) -> dict:
     - Put text in single quotes. Write an apostrophe at the start or end of a
       word twice, as in 'Ca'' Foscari'.
     - One row per INSERT. UPDATE and DELETE always need a WHERE with one condition.
-    - A table cannot be dropped or altered.
+    - A table cannot be dropped or altered, so choose the columns with care. When
+      later values might not be plain numbers (a year can be '1840-1842'), use CHAR.
 
     The whole script is all-or-nothing: if one statement fails, nothing is
     changed. Fix the problem and send the whole script again.

@@ -1,5 +1,7 @@
 from little_mcp.agent import Event
-from little_mcp.cli import add_to_chat, describe_change, parse_args, replay
+import pytest
+
+from little_mcp.cli import add_to_chat, describe_change, needs_question, parse_args, replay
 
 
 def test_parallel_results_land_under_their_own_tool_box():
@@ -45,3 +47,29 @@ def test_the_user_approves_the_whole_change_never_a_shortened_one():
     script = "\n".join(f"INSERT INTO T VALUES ('{i}')" for i in range(500))
     assert describe_change({"sql": script}) == script
     assert '"item": "APPLES"' in describe_change({"table": "FRUITS", "item": "APPLES", "delta": 5})
+
+
+def test_ask_defaults_to_always_and_allow_writes_means_never():
+    assert parse_args([]).ask == "always"
+    assert parse_args(["--ask", "except-inserts"]).ask == "except-inserts"
+    assert parse_args(["--allow-writes"]).ask == "never"
+
+
+INSERTS = "INSERT INTO BOOKS VALUES ('Cuore', 'Edmondo De Amicis', '1886')\nINSERT INTO BOOKS VALUES ('x', 'y', '1')"
+
+
+@pytest.mark.parametrize("ask, tool, args, question", [
+    ("always", "tiny_sql_write", {"sql": INSERTS}, True),
+    ("never", "tiny_sql_write", {"sql": "DELETE FROM BOOKS WHERE ID = 1"}, False),
+    ("never", "set_stock", {"table": "FRUITS", "item": "APPLES", "quantity": 0}, False),
+    ("except-inserts", "tiny_sql_write", {"sql": INSERTS}, False),
+    ("except-inserts", "tiny_sql_write", {"sql": "CREATE TABLE T (ID NUMBER(10))\n" + INSERTS}, True),
+    ("except-inserts", "tiny_sql_write", {"sql": INSERTS + "\nDELETE FROM BOOKS WHERE ID = 1"}, True),
+    ("except-inserts", "tiny_sql_write", {"sql": INSERTS + "; DELETE FROM BOOKS WHERE ID = 1"}, True),
+    ("except-inserts", "tiny_sql_write", {"sql": "UPDATE BOOKS SET YEAR = 1 WHERE ID = 1"}, True),
+    ("except-inserts", "tiny_sql_write", {"sql": "INSERT INTO"}, True),
+    ("except-inserts", "tiny_sql_write", {}, True),
+    ("except-inserts", "adjust_stock", {"table": "FRUITS", "item": "APPLES", "delta": 24}, True),
+])
+def test_when_a_change_needs_the_users_ok(ask, tool, args, question):
+    assert needs_question(ask, tool, args) is question

@@ -173,7 +173,19 @@ you all of it and asks:
 - in the **web UI**, with **Allow** and **Decline** buttons under the chat;
 - in the **terminal**, with `Allow tiny_sql_write? [y/N]`.
 
-`--allow-writes` skips the question.
+If the question gets in your way, choose when to be asked: under **Ask before
+changes** in the web UI, or with `--ask` when you start.
+
+| Choice | `--ask` | What runs without a question |
+|---|---|---|
+| Always (default) | `always` | Nothing |
+| Not for new rows | `except-inserts` | A `tiny_sql_write` made only of `INSERT`s |
+| Never | `never` | Everything |
+
+"Not for new rows" still asks before `CREATE TABLE`, because a table can't be
+dropped yet, and before `UPDATE`, `DELETE` and stock changes, because they change
+existing data. Your own parser makes the call here too: a `DELETE` hidden among
+the `INSERT`s brings the question back. `--allow-writes` is the same as `--ask never`.
 
 ### Chat history
 
