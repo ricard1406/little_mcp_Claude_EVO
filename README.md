@@ -361,6 +361,32 @@ of statement, not by looking at the text. The dialect is small on purpose, for
 now: there is no `AND`, `ORDER BY`, `COUNT`, `JOIN` or `DROP TABLE`. The model
 gets an error message saying what isn't supported, and can work around it.
 
+### Dates, and changing a table
+
+The Python version adds two things to the dialect (C++ and Rust don't have them yet):
+
+```sql
+CREATE TABLE TASKS (ID NUMBER(10), WHAT CHAR(40), DUE DATE)
+INSERT INTO TASKS VALUES ('Call Dianne', TODAY)
+SELECT WHAT FROM TASKS WHERE DUE < TODAY
+ALTER TABLE BOOKS MODIFY YEAR CHAR(20)
+ALTER TABLE BOOKS ADD BOUGHT DATE
+```
+
+- **`DATE`** stores one day as `YYYY-MM-DD`. It has no time zone, because a
+  birthday or a deadline is the same day everywhere. Only **`TODAY`** depends on
+  where you are: at 23:30 in New York it is already tomorrow in Rome. Set your
+  zone in `.env`, for example `LITTLE_MCP_TIMEZONE=Europe/Rome`; when it's empty,
+  the computer's own zone is used. Set it when the server runs on another machine
+  whose clock is in a different zone, such as a cloud server set to UTC.
+- **`ALTER TABLE ... MODIFY`** changes a column's width or type, when a column is
+  too small. It refuses if an existing value would no longer fit.
+- **`ALTER TABLE ... ADD`** adds a column at the end, empty in the existing rows.
+
+Because every column sits at fixed positions, `ALTER TABLE` writes every row
+again. The C++ and Rust programs can still read the tables afterwards; they show
+a `DATE` as plain text, and don't check dates they write.
+
 ### The warehouse
 
 The inventory (`FRUITS` and `VEGGIE`) is created with demo data the first time

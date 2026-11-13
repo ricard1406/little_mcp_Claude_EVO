@@ -58,7 +58,7 @@ ERROR: column NAME appears twice
 ERROR: the ID column must be the first one: rows are numbered by it
 
 > CREATE TABLE BAD (NAME TEXT(10))
-ERROR: unknown type "TEXT" for column NAME: use CHAR(<width>) or NUMBER(<width>)
+ERROR: unknown type "TEXT" for column NAME: use CHAR(<width>), NUMBER(<width>) or DATE
 
 > CREATE TABLE BAD (NAME CHAR(0))
 ERROR: invalid width "0" for column NAME: expected a positive number

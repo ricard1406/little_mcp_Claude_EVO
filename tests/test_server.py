@@ -132,3 +132,31 @@ async def test_a_failed_write_tells_the_model_what_to_fix():
         assert result.isError and "too long" in result.content[0].text and "Nothing was changed" in result.content[0].text
         described = data(await session.call_tool("tiny_sql_read", {"sql": "DESCRIBE"}))
         assert [r[0] for r in described["results"][0]["rows"]] == ["SYSTEM_TABLE"]
+
+
+async def test_a_column_too_small_can_be_widened_with_the_tools():
+    """The fresh-machine test: YEAR NUMBER(4) refuses '1840-1842' until the model widens it."""
+    async with connect() as session:
+        await session.call_tool("tiny_sql_write", {"sql": "CREATE TABLE BOOKS (ID NUMBER(10), TITLE CHAR(100), "
+                                                          "AUTHOR CHAR(100), YEAR NUMBER(4))"})
+        insert = "INSERT INTO BOOKS VALUES ('I Promessi Sposi', 'Alessandro Manzoni', '1840-1842')"
+        refused = await session.call_tool("tiny_sql_write", {"sql": insert})
+        assert refused.isError and "too long for column YEAR" in refused.content[0].text
+        fixed = await session.call_tool("tiny_sql_write", {"sql": "ALTER TABLE BOOKS MODIFY YEAR CHAR(20)\n" + insert})
+        assert not fixed.isError, fixed.content[0].text
+        rows = data(await session.call_tool("tiny_sql_read", {"sql": "SELECT YEAR FROM BOOKS"}))
+        assert rows["results"][0]["rows"] == [["1840-1842"]]
+
+
+async def test_the_tools_describe_dates_and_alter():
+    async with connect() as session:
+        tools = {t.name: t.description for t in (await session.list_tools()).tools}
+        assert "ALTER TABLE <table> MODIFY" in tools["tiny_sql_write"] and "TODAY" in tools["tiny_sql_write"]
+        assert "WHERE DUE < TODAY" in tools["tiny_sql_read"]
+
+
+async def test_local_time_follows_the_configured_zone(monkeypatch):
+    monkeypatch.setattr(server.config, "TIMEZONE", "Asia/Tokyo")
+    async with connect() as session:
+        result = data(await session.call_tool("get_datetime", {}))
+        assert result["timezone"] == "Asia/Tokyo"

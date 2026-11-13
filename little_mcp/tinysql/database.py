@@ -23,16 +23,36 @@ except ImportError:  # Windows has no fcntl: a single server still works, withou
 from .catalog import CATALOG_TABLE
 from .parser import parse_statement, split_statements
 from .session import Session, StatementResult
-from .statement import CreateTableStmt, DeleteStmt, DescribeStmt, InsertStmt, SelectStmt, UpdateStmt
+from .statement import (
+    AddColumnStmt,
+    CreateTableStmt,
+    DeleteStmt,
+    DescribeStmt,
+    InsertStmt,
+    ModifyColumnStmt,
+    SelectStmt,
+    UpdateStmt,
+)
 from .util import SqlError, same_name
 
 READ_STATEMENTS = (SelectStmt, DescribeStmt)
-WRITE_STATEMENTS = (CreateTableStmt, InsertStmt, UpdateStmt, DeleteStmt)
+WRITE_STATEMENTS = (CreateTableStmt, AddColumnStmt, ModifyColumnStmt, InsertStmt, UpdateStmt, DeleteStmt)
 
 MAX_ROWS = 200
 """A SELECT returns at most this many rows to the model, so one question cannot fill its memory."""
 
 _LOCK_FILE = ".lock"
+
+_NAMES = {
+    SelectStmt: "SELECT",
+    DescribeStmt: "DESCRIBE",
+    CreateTableStmt: "CREATE TABLE",
+    AddColumnStmt: "ALTER TABLE",
+    ModifyColumnStmt: "ALTER TABLE",
+    InsertStmt: "INSERT",
+    UpdateStmt: "UPDATE",
+    DeleteStmt: "DELETE",
+}
 
 # SYSTEM_TABLE's description of itself: name, type, first byte, last byte.
 _CATALOG_COLUMNS = [
@@ -75,10 +95,10 @@ def only_inserts(script: str) -> bool:
 class Database:
     """One myTinySQL database (a folder of files), safe to share between tools and servers."""
 
-    def __init__(self, directory: Path | str):
+    def __init__(self, directory: Path | str, timezone: str = ""):
         self.directory = Path(directory)
         self.directory.mkdir(parents=True, exist_ok=True)
-        self.session = Session(self.directory)
+        self.session = Session(self.directory, timezone)
         with self.locked():
             catalog = self.directory / CATALOG_TABLE
             if not catalog.exists():
@@ -129,7 +149,7 @@ class Database:
             except SqlError as error:
                 raise fail(number, sql, str(error)) from None
             if not isinstance(statement, allowed):
-                raise fail(number, sql, f"this tool does not run {type(statement).__name__[:-4].upper()}, {hint}")
+                raise fail(number, sql, f"this tool does not run {_NAMES.get(type(statement), 'that statement')}, {hint}")
             if isinstance(statement, WRITE_STATEMENTS) and same_name(statement.table, CATALOG_TABLE):
                 raise fail(number, sql, f"{CATALOG_TABLE} is managed by the database and cannot be changed")
             statements.append(statement)

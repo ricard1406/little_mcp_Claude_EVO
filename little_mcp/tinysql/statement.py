@@ -112,7 +112,7 @@ class ColumnFormatStmt:
 
 @dataclass(frozen=True)
 class ColumnDefinition:
-    """One column of a CREATE TABLE. `kind` is S1 for CHAR, N1 for NUMBER."""
+    """One column of a CREATE TABLE or ALTER TABLE. `kind` is S1 for CHAR, N1 for NUMBER, D1 for DATE."""
 
     name: str
     kind: str
@@ -128,6 +128,22 @@ class CreateTableStmt:
 
 
 @dataclass(frozen=True)
+class AddColumnStmt:
+    """`ALTER TABLE <table> ADD <column> <type>`: a new column at the end of every row. (Python only.)"""
+
+    table: str
+    column: ColumnDefinition
+
+
+@dataclass(frozen=True)
+class ModifyColumnStmt:
+    """`ALTER TABLE <table> MODIFY <column> <type>`: a new width or type for a column. (Python only.)"""
+
+    table: str
+    column: ColumnDefinition
+
+
+@dataclass(frozen=True)
 class DescribeStmt:
     """`DESCRIBE` lists the tables; `DESCRIBE <table>` lists that table's columns."""
 
@@ -140,5 +156,14 @@ class Comment:
 
 
 Statement = (
-    SelectStmt | InsertStmt | UpdateStmt | DeleteStmt | CreateTableStmt | ColumnFormatStmt | DescribeStmt | Comment
+    SelectStmt
+    | InsertStmt
+    | UpdateStmt
+    | DeleteStmt
+    | CreateTableStmt
+    | AddColumnStmt
+    | ModifyColumnStmt
+    | ColumnFormatStmt
+    | DescribeStmt
+    | Comment
 )

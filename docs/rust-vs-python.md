@@ -12,7 +12,7 @@ messages and the same files on disk. Only the language changes.
 
 | Check | Result |
 | --- | --- |
-| The 8 test scripts of the C++ and Rust versions, with their `.expected` files copied unchanged | Identical, byte for byte (`pytest tests/test_tinysql.py`) |
+| The 8 test scripts of the C++ and Rust versions, with their `.expected` files | Identical, byte for byte, except one line changed on purpose (section 8) |
 | The Rust unit tests | Ported to Python: all pass |
 | Six scripts run in a row by both programs (`create`, `insert`, `update`, `delete`, `apostrophes`, `errors`) | Identical output (330 lines) and identical data files |
 | Tables written by Python, then read and changed by the Rust program, then read by Python again | Works in both directions, with `’`, `è` and `d'Asti` in the values |
@@ -22,15 +22,16 @@ messages and the same files on disk. Only the language changes.
 | Rust | Python | Lines | Notes |
 | --- | --- | --- | --- |
 | `util.rs` | `util.py` | 147 → 104 | `SqlError` becomes an exception; the unit tests moved to `tests/` |
-| `statement.rs` | `statement.py` | 156 → 144 | One dataclass per variant |
-| `parser.rs` | `parser.py` | 562 → 434 | Same tokenizer and recursive descent |
+| `statement.rs` | `statement.py` | 156 → 169 | One dataclass per variant |
+| `parser.rs` | `parser.py` | 562 → 472 | Same tokenizer and recursive descent |
 | `catalog.rs` | `catalog.py` | 177 → 117 | |
-| `table_file.rs` | `table_file.py` | 234 → 162 | Lines are `bytearray`, see section 3 |
-| `session.rs` | `session.py` | 476 → 351 | `ResultSet` keeps only what the console needs |
+| `table_file.rs` | `table_file.py` | 234 → 170 | Lines are `bytearray`, see section 3 |
+| `session.rs` | `session.py` | 476 → 492 | `ResultSet` keeps only what the console needs |
 | `output.rs` | `output.py` | 169 → 37 | No JSON: there is no browser server |
 | `server.rs` | (none) | 287 → 0 | The engine lives inside the MCP server, so it needs no port of its own |
 | `main.rs` | `__main__.py` | 210 → 68 | Without the server options |
-| (none) | `database.py` | 0 → 174 | Only in Python, see section 7 |
+| (none) | `dates.py` | 0 → 68 | Only in Python, see section 8 |
+| (none) | `database.py` | 0 → 194 | Only in Python, see section 7 |
 
 ## 1. `enum` and `match` → dataclasses and `match`
 
@@ -157,3 +158,28 @@ differently or not at all:
 Two small changes come from the same reason. `_check_fits` refuses a value containing a line break, because here a
 statement can reach the engine without going through the line-by-line splitter. And `store.py` builds statements
 directly as objects, so a value is never parsed at all: this is what a parameterized query does in other databases.
+
+## 8. When the dialect grows: `DATE` and `ALTER TABLE`
+
+Up to section 7, the three versions speak exactly the same SQL. The Python version is the first to add to it:
+a `DATE` type and `ALTER TABLE ... ADD` / `MODIFY`. Three things are worth seeing in how that was done.
+
+**The files stay readable by the older programs.** SYSTEM_TABLE records a type code for each column, `S1` or
+`N1`, and C++ and Rust read it as text without checking it. So a `DATE` column is recorded as `D1`, and the older
+programs simply show it as text. `ALTER TABLE` writes the same fixed-width files, only with new positions. A
+table that Python has altered can still be read and changed by the Rust program (tested with `BOOKS`, after a
+`MODIFY` and an `ADD`). What the older programs cannot do is check a date: they would accept `2026-02-30`.
+
+**A changed spec means a changed test.** The golden files are the specification all three versions share. One
+error message had to change: an unknown type used to say "use CHAR(<width>) or NUMBER(<width>)", and that is no
+longer true. So that one line of `create.expected` now differs from the C++ and Rust copies, and the golden
+README says so. If those versions get `DATE` too, they take the same line.
+
+**A date is stored as text that sorts.** `YYYY-MM-DD` sorts as text in the same order as in time, so the engine's
+existing comparisons work on dates with no new code. The only new rules are at the edges: a value must be a real
+day, `TODAY` is resolved in a chosen time zone (with `zoneinfo`, from Python's standard library; Rust's standard
+library has no time zones), and an empty date passes no comparison, like `NULL` in SQL.
+
+`ALTER TABLE` shows the price of fixed-width rows: there is no free space, so changing one column's width moves
+every column after it, in every row. The engine prepares both files in memory, checks everything, and only then
+replaces them. The window between the two replacements is the next thing a journal would close.

@@ -39,6 +39,19 @@ def _place(record: bytearray, column: Column, value: str) -> None:
     record[column.start : column.to + 1] = value.encode().ljust(column.width)
 
 
+def replace_file(path: Path, content: bytes) -> None:
+    """Replaces a file's content through a temporary copy, so a crash never leaves it half-written."""
+    temporary = path.with_name(path.name + ".tmp")
+    try:
+        temporary.write_bytes(content)
+    except OSError:
+        raise SqlError(f"cannot write {temporary}") from None
+    try:
+        os.replace(temporary, path)
+    except OSError as e:
+        raise SqlError(f"cannot replace {path}: {e}") from None
+
+
 def _lacks_final_newline(path: Path) -> bool:
     """Tells whether a file exists, is not empty, and does not end with a line feed."""
     try:
@@ -117,16 +130,7 @@ class TableFile:
 
         if changed == 0:
             return 0  # nothing to rewrite
-
-        temporary = self.path.with_name(self.path.name + ".tmp")
-        try:
-            temporary.write_bytes(kept)
-        except OSError:
-            raise SqlError(f"cannot write {temporary}") from None
-        try:
-            os.replace(temporary, self.path)
-        except OSError as e:
-            raise SqlError(f"cannot replace {self.path}: {e}") from None
+        replace_file(self.path, bytes(kept))
         return changed
 
     def next_id(self) -> int:
@@ -140,8 +144,8 @@ class TableFile:
         """Adds one row at the end of the file: one value per column, ID included."""
         self.append_rows([values])
 
-    def append_rows(self, rows: list[Row]) -> None:
-        """Adds several rows in one write. Every row is checked first, so a bad row adds nothing."""
+    def encode_rows(self, rows: list[Row]) -> bytes:
+        """Lays rows out as the lines of a data file. Every value is checked, and nothing is written."""
         columns = self.schema.columns
         records = bytearray()
         for values in rows:
@@ -152,9 +156,13 @@ class TableFile:
                 _check_fits(column, value)
                 _place(record, column, value)
             records += record + b"\n"
+        return bytes(records)
 
+    def append_rows(self, rows: list[Row]) -> None:
+        """Adds several rows in one write. Every row is checked first, so a bad row adds nothing."""
+        records = self.encode_rows(rows)
         # Make sure the new row starts on its own line, even if the file lacks a final newline.
-        text = (b"\n" if _lacks_final_newline(self.path) else b"") + bytes(records)
+        text = (b"\n" if _lacks_final_newline(self.path) else b"") + records
         try:
             with self.path.open("ab") as out:
                 out.write(text)

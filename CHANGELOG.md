@@ -12,6 +12,11 @@
   Gradio is now a required dependency, and the `ui` extra is gone.
 - **The web UI asks before changing data**, with Allow and Decline buttons and the whole
   change on screen. Before, it could only block changes or allow them all.
+- **New type `DATE`** (`YYYY-MM-DD`) and the word `TODAY`, which follows your time zone
+  (`LITTLE_MCP_TIMEZONE` in `.env`). `get_datetime` uses the same zone for local time.
+- **`ALTER TABLE ... ADD`** and **`ALTER TABLE ... MODIFY`:** add a column, or change a
+  column's width or type, for example when a column is too small.
+- The read tool's error now names a refused statement properly ("CREATE TABLE", not "CREATETABLE").
 - **Ask less often:** "Ask before changes" in the web UI, and `--ask` on the command line.
   With "Not for new rows", a script of `INSERT`s runs without the Allow question.
 - The web UI counts the seconds while the model works, and has a **Stop** button.

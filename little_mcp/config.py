@@ -21,6 +21,11 @@ HTTP_TIMEOUT = float(os.getenv("HTTP_TIMEOUT", "10"))
 OPENWEATHER_API_KEY = os.getenv("OPENWEATHER_API_KEY", "")
 EMBED_MODEL = os.getenv("EMBED_MODEL", "nomic-embed-text")
 
+# Your time zone, such as Europe/Rome: the day TODAY means in myTinySQL, and the local
+# time of get_datetime. Empty: this computer's zone. It matters when the server runs on
+# a machine set to another zone than yours (a cloud server is often set to UTC).
+TIMEZONE = os.getenv("LITTLE_MCP_TIMEZONE", "").strip()
+
 # Saved conversations: one file per chat (see history.py).
 CHATS_DIR = Path(os.getenv("LITTLE_MCP_CHATS_DIR", DATA_DIR / "chats"))
 

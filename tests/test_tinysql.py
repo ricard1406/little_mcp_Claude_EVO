@@ -224,3 +224,178 @@ def test_two_connections_take_turns(tmp_path):
         list(pool.map(lambda i: (first if i % 2 else second).write("INSERT INTO T VALUES (x)"), range(40)))
     ids = [row[0] for row in first.read("SELECT * FROM T")["results"][0]["rows"]]
     assert sorted(map(int, ids)) == list(range(1, 41))
+
+
+# --- DATE (Python only) ------------------------------------------------------------------
+
+from datetime import datetime, timezone  # noqa: E402
+
+from little_mcp.tinysql.dates import check_date, today  # noqa: E402
+
+# 23:30 in London on 13 November: already the 14th in Rome, still the 13th in New York.
+LATE_EVENING_UTC = datetime(2026, 11, 13, 23, 30, tzinfo=timezone.utc)
+
+
+def test_today_depends_on_the_time_zone():
+    assert today("Europe/Rome", LATE_EVENING_UTC) == "2026-11-14"
+    assert today("America/New_York", LATE_EVENING_UTC) == "2026-11-13"
+    assert today("UTC", LATE_EVENING_UTC) == "2026-11-13"
+    with pytest.raises(SqlError, match="unknown time zone 'Mars/Olympus'"):
+        today("Mars/Olympus", LATE_EVENING_UTC)
+
+
+@pytest.mark.parametrize("value, stored", [
+    ("2026-11-13", "2026-11-13"), (" 2024-02-29 ", "2024-02-29"), ("", ""), ("today", "2026-11-14"),
+])
+def test_dates_that_are_accepted(value, stored):
+    assert check_date(value, "D", "Europe/Rome", LATE_EVENING_UTC) == stored
+
+
+@pytest.mark.parametrize("value, message", [
+    ("2026-02-30", "not a real day"), ("2025-02-29", "not a real day"), ("2026-13-01", "not a real day"),
+    ("13/11/2026", "write YYYY-MM-DD"), ("2026-1-5", "write YYYY-MM-DD"), ("20261113", "write YYYY-MM-DD"),
+    ("tomorrow", "write YYYY-MM-DD"),
+])
+def test_dates_that_are_refused(value, message):
+    with pytest.raises(SqlError, match=message):
+        check_date(value, "D")
+
+
+@pytest.fixture
+def dated(tmp_path):
+    session = Session(_fresh(tmp_path), timezone="Europe/Rome", clock=lambda: LATE_EVENING_UTC)
+    session.run(parse_statement("CREATE TABLE TASKS (ID NUMBER(10), WHAT CHAR(20), DUE DATE)"))
+    for what, due in [("old", "2026-11-01"), ("now", "TODAY"), ("later", "2026-12-24"), ("someday", "")]:
+        assert not session.execute(f"INSERT INTO TASKS VALUES ('{what}', '{due}')").failed
+    return session
+
+
+def rows(session, sql):
+    result = session.execute(sql)
+    assert not result.failed, result.message
+    return result.table.rows
+
+
+def test_a_date_column_is_ten_bytes_and_today_is_romes(dated):
+    assert rows(dated, "DESCRIBE TASKS")[2] == ["DUE", "D1", "30", "39", "10"]
+    assert rows(dated, "SELECT WHAT,DUE FROM TASKS WHERE ID = 2") == [["now", "2026-11-14"]]
+
+
+def test_dates_compare_in_time_order_and_empty_means_no_date(dated):
+    assert rows(dated, "SELECT WHAT FROM TASKS WHERE DUE < TODAY") == [["old"]]
+    assert rows(dated, "SELECT WHAT FROM TASKS WHERE DUE >= '2026-11-14'") == [["now"], ["later"]]
+    assert rows(dated, "SELECT WHAT FROM TASKS WHERE DUE != '2026-11-01'") == [["now"], ["later"]]
+    assert rows(dated, "SELECT WHAT FROM TASKS WHERE DUE = ''") == [["someday"]]
+    assert rows(dated, "SELECT WHAT FROM TASKS WHERE DUE LIKE '2026-11%'") == [["old"], ["now"]]
+
+
+def test_a_wrong_date_is_an_error_not_an_empty_answer(dated):
+    for sql in ["SELECT * FROM TASKS WHERE DUE = 13/11/2026",
+                "INSERT INTO TASKS VALUES ('x', '2026-02-30')",
+                "UPDATE TASKS SET DUE = 'next week' WHERE ID = 1",
+                "DELETE FROM TASKS WHERE DUE < 'soon'"]:
+        result = dated.execute(sql)
+        assert result.failed and "DUE" in result.message, sql
+    assert len(rows(dated, "SELECT * FROM TASKS")) == 4
+
+
+def test_update_and_delete_with_dates(dated):
+    assert dated.execute("UPDATE TASKS SET DUE = TODAY WHERE WHAT = someday").message == "1 row updated in TASKS"
+    assert dated.execute("DELETE FROM TASKS WHERE DUE < TODAY").message == "1 row deleted from TASKS"
+    assert rows(dated, "SELECT WHAT FROM TASKS WHERE DUE = TODAY") == [["now"], ["someday"]]
+
+
+def test_date_has_no_width():
+    with pytest.raises(SqlError, match="DATE has no width"):
+        parse_statement("CREATE TABLE T (D DATE(10))")
+
+
+# --- ALTER TABLE (Python only) --------------------------------------------------------------
+
+
+@pytest.fixture
+def books(tmp_path):
+    session = Session(_fresh(tmp_path))
+    session.execute("CREATE TABLE BOOKS (ID NUMBER(10), TITLE CHAR(20), YEAR NUMBER(4), AUTHOR CHAR(20))")
+    session.execute("INSERT INTO BOOKS VALUES ('Pinocchio', '1883', 'Carlo Collodi')")
+    session.execute("INSERT INTO BOOKS VALUES ('Cuore', '1886', 'Edmondo De Amicis')")
+    return session
+
+
+def test_a_value_too_long_fits_after_modify(books):
+    """What happened on the test machine: YEAR NUMBER(4) cannot hold a period."""
+    failed = books.execute("INSERT INTO BOOKS VALUES ('I Promessi Sposi', '1840-1842', 'Alessandro Manzoni')")
+    assert failed.failed and "too long for column YEAR" in failed.message
+    assert books.execute("ALTER TABLE BOOKS MODIFY YEAR CHAR(20)").message == (
+        "column YEAR of BOOKS is now CHAR(20) (row length 70)")
+    assert not books.execute("INSERT INTO BOOKS VALUES ('I Promessi Sposi', '1840-1842', 'Alessandro Manzoni')").failed
+    assert rows(books, "SELECT * FROM BOOKS") == [
+        ["1", "Pinocchio", "1883", "Carlo Collodi"],
+        ["2", "Cuore", "1886", "Edmondo De Amicis"],
+        ["3", "I Promessi Sposi", "1840-1842", "Alessandro Manzoni"],
+    ]
+    # The columns after YEAR moved along, in the catalogue too.
+    assert rows(books, "DESCRIBE BOOKS") == [
+        ["ID", "N1", "0", "9", "10"], ["TITLE", "S1", "10", "29", "20"],
+        ["YEAR", "S1", "30", "49", "20"], ["AUTHOR", "S1", "50", "69", "20"]]
+
+
+def test_add_a_column(books):
+    assert books.execute("ALTER TABLE BOOKS ADD COLUMN (READ DATE)").message == (
+        "column READ added to BOOKS (row length 64)")
+    assert rows(books, "SELECT TITLE,READ FROM BOOKS") == [["Pinocchio", ""], ["Cuore", ""]]
+    books.execute("UPDATE BOOKS SET READ = '2026-11-13' WHERE ID = 1")
+    assert rows(books, "SELECT TITLE FROM BOOKS WHERE READ = '2026-11-13'") == [["Pinocchio"]]
+    assert not books.execute("INSERT INTO BOOKS VALUES ('Malombra', '1881', 'Antonio Fogazzaro', TODAY)").failed
+    assert rows(books, "DESCRIBE")[-1] == ["BOOKS", "5", "64"]
+
+
+def test_narrowing_refuses_a_value_that_would_not_fit(books):
+    before = rows(books, "SELECT * FROM BOOKS")
+    failed = books.execute("ALTER TABLE BOOKS MODIFY AUTHOR CHAR(14)")
+    assert failed.failed and "'Edmondo De Amicis' is too long" in failed.message and "ID 2" in failed.message
+    assert rows(books, "SELECT * FROM BOOKS") == before
+    assert not books.execute("ALTER TABLE BOOKS MODIFY AUTHOR CHAR(17)").failed
+    assert rows(books, "SELECT * FROM BOOKS") == before
+
+
+def test_changing_to_date_checks_every_value(books):
+    failed = books.execute("ALTER TABLE BOOKS MODIFY YEAR DATE")
+    assert failed.failed and "'1883' is not a date" in failed.message
+
+
+@pytest.mark.parametrize("sql, message", [
+    ("ALTER TABLE BOOKS ADD TITLE CHAR(5)", "appears twice"),
+    ("ALTER TABLE BOOKS ADD ID NUMBER(10)", "appears twice"),
+    ("ALTER TABLE BOOKS ADD 9LIVES CHAR(5)", "invalid column name"),
+    ("ALTER TABLE BOOKS MODIFY PAGES NUMBER(5)", "unknown column 'PAGES'"),
+    ("ALTER TABLE BOOKS ADD BIG CHAR(99999)", "the limit is 99999"),
+    ("ALTER TABLE SYSTEM_TABLE ADD X CHAR(1)", "SYSTEM_TABLE cannot be changed"),
+    ("ALTER TABLE NOPE ADD X CHAR(1)", "unknown table 'NOPE'"),
+    ("ALTER TABLE BOOKS DROP COLUMN YEAR", "cannot DROP yet"),
+    ("ALTER TABLE BOOKS RENAME TO B", "cannot RENAME yet"),
+    ("ALTER TABLE BOOKS", "expected ADD or MODIFY"),
+    ("ALTER TABLE BOOKS ADD (X CHAR(1)", "expected ')'"),
+])
+def test_alter_errors_change_nothing(books, sql, message):
+    before = {p.name: p.read_bytes() for p in books.data_dir.iterdir()}
+    result = books.execute(sql)
+    assert result.failed and message in result.message, result.message
+    assert {p.name: p.read_bytes() for p in books.data_dir.iterdir()} == before
+
+
+def test_alter_is_a_change_for_the_tools(db):
+    db.write("CREATE TABLE T (ID NUMBER(10), N CHAR(5))")
+    with pytest.raises(SqlError, match="does not run ALTER TABLE"):
+        db.read("ALTER TABLE T ADD X CHAR(1)")
+    with pytest.raises(SqlError, match="does not run CREATE TABLE"):
+        db.read("CREATE TABLE U (A CHAR(1))")
+    assert db.write("ALTER TABLE T MODIFY N CHAR(9)")["messages"] == ["column N of T is now CHAR(9) (row length 19)"]
+    assert only_inserts("ALTER TABLE T ADD X CHAR(1)") is False
+
+
+def test_an_id_added_later_would_not_be_first(tmp_path):
+    session = Session(_fresh(tmp_path))
+    session.execute("CREATE TABLE T (NAME CHAR(5))")
+    result = session.execute("ALTER TABLE T ADD ID NUMBER(10)")
+    assert result.failed and "must be the first" in result.message

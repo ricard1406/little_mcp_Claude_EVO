@@ -63,7 +63,7 @@ def inventory() -> Inventory:
 def database() -> Database:
     global _database
     if _database is None:
-        _database = Database(config.TINYSQL_DIR)
+        _database = Database(config.TINYSQL_DIR, config.TIMEZONE)
     return _database
 
 
@@ -84,12 +84,13 @@ def get_datetime(city: str = "") -> dict:
     """Current date, time and day of the week.
 
     Args:
-        city: A city such as "Tokyo" or "Paris, France". Leave empty for the local time.
+        city: A city such as "Tokyo" or "Paris, France". Leave empty for the user's own time.
     """
     if not city.strip():
-        now = datetime.now().astimezone()
-        return {"city": "local", "timezone": str(now.tzinfo), "datetime": now.strftime("%Y-%m-%d %H:%M:%S"),
-                "day_of_week": now.strftime("%A")}
+        # The user's zone from .env (LITTLE_MCP_TIMEZONE), or this computer's.
+        now = datetime.now(ZoneInfo(config.TIMEZONE)) if config.TIMEZONE else datetime.now().astimezone()
+        return {"city": "local", "timezone": config.TIMEZONE or str(now.tzinfo),
+                "datetime": now.strftime("%Y-%m-%d %H:%M:%S"), "day_of_week": now.strftime("%A")}
 
     from timezonefinder import TimezoneFinder
 
@@ -229,13 +230,15 @@ def tiny_sql_read(sql: str) -> dict:
 
     Grammar (one statement per line):
       DESCRIBE                     list the tables
-      DESCRIBE <table>             list the columns of a table
+      DESCRIBE <table>             list the columns of a table (TYPE: S1 CHAR, N1 NUMBER, D1 DATE)
       SELECT * FROM <table>
       SELECT <col>,<col> FROM <table> WHERE <col> <op> 'value'
 
     <op> is = != < <= > >= or LIKE (LIKE ignores case; % is any text, _ one letter).
-    A number compares as a number. WHERE takes one condition. There is no AND,
-    OR, ORDER BY, COUNT or JOIN: read the rows and work out the rest yourself.
+    A number compares as a number. A DATE compares as a date: write 'YYYY-MM-DD'
+    or TODAY, e.g. WHERE DUE < TODAY. An empty date matches only = ''.
+    WHERE takes one condition. There is no AND, OR, ORDER BY, COUNT or JOIN:
+    read the rows and work out the rest yourself.
 
     Args:
         sql: One or more statements, one per line.
@@ -248,7 +251,9 @@ def tiny_sql_write(sql: str) -> dict:
     """Create tables and change rows in the user's myTinySQL database.
 
     Grammar (one whole statement per line, never split a statement over lines):
-      CREATE TABLE <table> (ID NUMBER(10), <col> CHAR(<width>), <col> NUMBER(<width>))
+      CREATE TABLE <table> (ID NUMBER(10), <col> CHAR(<width>), <col> NUMBER(<width>), <col> DATE)
+      ALTER TABLE <table> ADD <col> CHAR(<width>)        a new column, empty in the existing rows
+      ALTER TABLE <table> MODIFY <col> CHAR(<width>)     a new width (or type) for a column
       INSERT INTO <table> VALUES ('text', 'text')
       UPDATE <table> SET <col> = 'value' WHERE <col> <op> 'value'
       DELETE FROM <table> WHERE <col> <op> 'value'
@@ -256,15 +261,17 @@ def tiny_sql_write(sql: str) -> dict:
     Rules:
     - A first column called ID is numbered automatically: leave it out of INSERT.
     - Names: up to 20 letters, digits, _ or -, starting with a letter.
-    - Only CHAR and NUMBER exist. Use NUMBER only for plain whole numbers, and
-      CHAR for anything else (for example a period like '1840-1842').
+    - The types are CHAR, NUMBER and DATE. Use NUMBER only for plain whole numbers,
+      DATE for a single day, and CHAR for anything else (a period like '1840-1842').
+    - A DATE is written 'YYYY-MM-DD' (convert 13/11/2026 to '2026-11-13'), or TODAY
+      for the user's today. '' means no date.
     - Widths are in bytes and a longer value is refused, so be generous, for
       example CHAR(100) for a title. An accented letter takes 2 bytes or more.
     - Put text in single quotes. Write an apostrophe at the start or end of a
       word twice, as in 'Ca'' Foscari'.
     - One row per INSERT. UPDATE and DELETE always need a WHERE with one condition.
-    - A table cannot be dropped or altered, so choose the columns with care. When
-      later values might not be plain numbers (a year can be '1840-1842'), use CHAR.
+    - If a value is too long, or a type is wrong, change the column with ALTER TABLE
+      MODIFY, then send the INSERT again. A table cannot be dropped yet.
 
     The whole script is all-or-nothing: if one statement fails, nothing is
     changed. Fix the problem and send the whole script again.

@@ -17,6 +17,7 @@ read side by side. docs/rust-vs-python.md compares them.
 | output.rs       | output.py       | Console text                              |
 | main.rs         | __main__.py     | The command line                          |
 | (none)          | database.py     | Lock and policy for the MCP server        |
+| (none)          | dates.py        | The DATE type and TODAY                   |
 
 Every input becomes SQL text. split_statements() cuts it into statements,
 parse_statement() turns each one into a Statement, and Session.run() runs it.

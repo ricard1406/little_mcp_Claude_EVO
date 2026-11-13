@@ -6,11 +6,14 @@ The grammar:
     INSERT INTO <table> VALUES (<value>[,<value>...])
     UPDATE <table> SET <col> = <value>[,<col> = <value>...] WHERE <col> <op> <value>
     DELETE FROM <table> WHERE <col> <op> <value>
-    CREATE TABLE <table> (<col> CHAR(<width>)|NUMBER(<width>)[,...])
+    CREATE TABLE <table> (<col> <type>[,...])
+    ALTER TABLE <table> ADD <col> <type>                      (Python only)
+    ALTER TABLE <table> MODIFY <col> <type>                   (Python only)
     COLUMN <col> FORMAT A<width>
     DESCRIBE [<table>]
     REM <comment>    -- <comment>
 
+<type> is CHAR(<width>), NUMBER(<width>) or DATE (Python only).
 <op> is one of = != <> < <= > >= or LIKE (with % and _ wildcards). Keywords are
 case-insensitive. A trailing ; or @ is ignored.
 
@@ -23,7 +26,9 @@ import re
 from dataclasses import dataclass
 from typing import NoReturn
 
+from .dates import DATE_KIND, DATE_WIDTH
 from .statement import (
+    AddColumnStmt,
     Assignment,
     ColumnDefinition,
     ColumnFormatStmt,
@@ -35,6 +40,7 @@ from .statement import (
     DescribeStmt,
     InsertStmt,
     Literal,
+    ModifyColumnStmt,
     Operator,
     SelectItem,
     SelectStmt,
@@ -182,6 +188,7 @@ class Parser:
             "UPDATE": self.parse_update,
             "DELETE": self.parse_delete,
             "CREATE": self.parse_create_table,
+            "ALTER": self.parse_alter_table,
             "COLUMN": self.parse_column,
             "DESCRIBE": self.parse_describe,
         }
@@ -357,22 +364,53 @@ class Parser:
         self.expect_symbol("(")
         columns: list[ColumnDefinition] = []
         while True:
-            name = self.expect_word("a column name")
-            kind = ascii_upper(self.expect_word("a type (CHAR or NUMBER)"))
-            if kind not in ("CHAR", "NUMBER"):
-                raise SqlError(f'unknown type "{kind}" for column {name}: use CHAR(<width>) or NUMBER(<width>)')
-            self.expect_symbol("(")
-            width_text = self.expect_word("a width")
-            width = parse_integer(width_text)
-            if width is None or width < 1:
-                raise SqlError(f'invalid width "{width_text}" for column {name}: expected a positive number')
-            self.expect_symbol(")")
-            columns.append(ColumnDefinition(name, "S1" if kind == "CHAR" else "N1", width))
+            columns.append(self.parse_column_definition())
             if not self.accept_symbol(","):
                 break
         self.expect_symbol(")")
         self.expect_end()
         return CreateTableStmt(table, columns)
+
+    def parse_column_definition(self) -> ColumnDefinition:
+        """Parses `<col> CHAR(<width>)`, `<col> NUMBER(<width>)` or `<col> DATE`."""
+        name = self.expect_word("a column name")
+        kind = ascii_upper(self.expect_word("a type (CHAR, NUMBER or DATE)"))
+        if kind == "DATE":
+            if self.peek() == Symbol("("):
+                raise SqlError(f"DATE has no width (it is always YYYY-MM-DD): write {name} DATE")
+            return ColumnDefinition(name, DATE_KIND, DATE_WIDTH)
+        if kind not in ("CHAR", "NUMBER"):
+            # The C++ and Rust versions say "use CHAR(<width>) or NUMBER(<width>)": they have no DATE.
+            raise SqlError(f'unknown type "{kind}" for column {name}: use CHAR(<width>), NUMBER(<width>) or DATE')
+        self.expect_symbol("(")
+        width_text = self.expect_word("a width")
+        width = parse_integer(width_text)
+        if width is None or width < 1:
+            raise SqlError(f'invalid width "{width_text}" for column {name}: expected a positive number')
+        self.expect_symbol(")")
+        return ColumnDefinition(name, "S1" if kind == "CHAR" else "N1", width)
+
+    def parse_alter_table(self) -> AddColumnStmt | ModifyColumnStmt:
+        """Parses `ALTER TABLE <table> ADD|MODIFY [COLUMN] <col> <type>`, with optional ( ) as in Oracle."""
+        self.expect_keyword("ALTER")
+        self.expect_keyword("TABLE")
+        table = self.expect_word("a table name")
+        if self.accept_keyword("ADD"):
+            statement = AddColumnStmt
+        elif self.accept_keyword("MODIFY"):
+            statement = ModifyColumnStmt
+        else:
+            word = self.peek_word()
+            if word is not None and (same_name(word, "DROP") or same_name(word, "RENAME")):
+                raise SqlError(f"ALTER TABLE cannot {ascii_upper(word)} yet: it can ADD a column or MODIFY one")
+            self.fail("ADD or MODIFY")
+        self.accept_keyword("COLUMN")
+        in_brackets = self.accept_symbol("(")
+        column = self.parse_column_definition()
+        if in_brackets:
+            self.expect_symbol(")")
+        self.expect_end()
+        return statement(table, column)
 
     def parse_column(self) -> ColumnFormatStmt:
         self.expect_keyword("COLUMN")
