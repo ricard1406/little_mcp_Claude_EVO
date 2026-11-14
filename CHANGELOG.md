@@ -12,6 +12,9 @@
   Gradio is now a required dependency, and the `ui` extra is gone.
 - **The web UI asks before changing data**, with Allow and Decline buttons and the whole
   change on screen. Before, it could only block changes or allow them all.
+- **Ctrl+C closes cleanly.** The web UI printed pages of errors when stopped, because the MCP
+  session was opened in one task and closed in another. The terminal chat waited for Enter
+  after Ctrl+C at the prompt. Both now quit at once.
 - **Decimal numbers:** `NUMBER` holds values like `1338.80`, they compare as numbers, and a
   value that isn't a number is refused with a hint (`1.338,80` → `1338.80`).
 - **SQL console:** `python -m little_mcp.tinysql` opens your tables, with arrow-key history,

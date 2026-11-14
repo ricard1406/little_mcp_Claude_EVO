@@ -10,6 +10,7 @@ import argparse
 import asyncio
 import json
 import sys
+import threading
 import time
 from collections import defaultdict
 
@@ -96,8 +97,34 @@ def needs_question(ask: str, tool: str, args: dict) -> bool:
     return True
 
 
+async def _input(prompt: str) -> str:
+    """input() without blocking the event loop, and without blocking Ctrl+C.
+
+    asyncio.to_thread would also work, but Python waits for its threads before
+    exiting, so Ctrl+C at the prompt did nothing until Enter was pressed. A daemon
+    thread is not waited for.
+    """
+    loop = asyncio.get_running_loop()
+    answer: asyncio.Future = loop.create_future()
+
+    def deliver(setter, value) -> None:
+        if not answer.done():  # after Ctrl+C nobody is waiting any more
+            setter(value)
+
+    def read() -> None:
+        try:
+            line = input(prompt)
+        except BaseException as error:  # EOFError (Ctrl+D) goes back to the caller
+            loop.call_soon_threadsafe(deliver, answer.set_exception, error)
+        else:
+            loop.call_soon_threadsafe(deliver, answer.set_result, line)
+
+    threading.Thread(target=read, daemon=True).start()
+    return await answer
+
+
 async def _ask_in_terminal(tool: str, args: dict, thread_id: str) -> bool:
-    answer = await asyncio.to_thread(input, f"\n  ⚠️  Allow {tool}?\n{describe_change(args)}\n[y/N] ")
+    answer = await _input(f"\n  ⚠️  Allow {tool}?\n{describe_change(args)}\n[y/N] ")
     return answer.strip().lower() in ("y", "yes", "s", "si", "sì")
 
 
@@ -113,7 +140,7 @@ async def run_text(args, llm) -> None:
         print("Type 'quit' to exit.\n")
         while True:
             try:
-                question = (await asyncio.to_thread(input, "You: ")).strip()
+                question = (await _input("You: ")).strip()
             except (EOFError, KeyboardInterrupt):
                 break
             if question.lower() in ("quit", "exit", "bye"):
@@ -195,7 +222,7 @@ def run_graph(args, llm) -> None:
     import gradio as gr
 
     history = ChatHistory()
-    agent_holder: dict = {}
+    host: dict = {}  # the task that owns the MCP session: "task", "ready", "stop", "loop"
     lock = asyncio.Lock()
     queues: dict[str, asyncio.Queue] = {}  # chat id -> what its running turn wants to show
     answers: dict[str, asyncio.Future] = {}  # chat id -> the Allow / Decline click it waits for
@@ -217,13 +244,37 @@ def run_graph(args, llm) -> None:
             finally:
                 del answers[chat_id]
 
+    # The MCP session is opened and closed by one task that lives as long as the app.
+    # anyio, which the MCP library uses, requires a session to be closed by the same task
+    # that opened it. Opened inside the first chat turn, it could only be closed by
+    # Python's clean-up at exit, from another task: that printed pages of errors on Ctrl+C.
+
+    async def keep_agent(ready: asyncio.Future, stop: asyncio.Event) -> None:
+        try:
+            async with LittleAgent(llm, args.server_url, ask_in_browser,
+                                   trim_history=args.provider == "ollama") as agent:
+                ready.set_result(agent)
+                await stop.wait()
+        except Exception as error:  # e.g. the server did not start: the next message tries again
+            if not ready.done():
+                ready.set_exception(error)
+
     async def get_agent() -> LittleAgent:
-        # Created inside Gradio's event loop, which is where the MCP session must live.
         async with lock:
-            if "agent" not in agent_holder:
-                agent = LittleAgent(llm, args.server_url, ask_in_browser, trim_history=args.provider == "ollama")
-                agent_holder["agent"] = await agent.__aenter__()
-        return agent_holder["agent"]
+            if "task" not in host or host["task"].done():
+                loop = asyncio.get_running_loop()  # Gradio's event loop, where the session must live
+                ready, stop = loop.create_future(), asyncio.Event()
+                host.update(loop=loop, ready=ready, stop=stop, task=loop.create_task(keep_agent(ready, stop)))
+            ready = host["ready"]
+        # shield: a Stop click while the server starts must not cancel the start itself.
+        return await asyncio.shield(ready)
+
+    async def close_agent() -> None:
+        for turn in list(turns.values()):
+            turn.cancel()
+        if "task" in host and not host["task"].done():
+            host["stop"].set()
+            await asyncio.wait_for(host["task"], 15)
 
     def past_chats(selected: str | None = None):
         return gr.update(choices=[(c.label, c.id) for c in history.chats()], value=selected)
@@ -332,8 +383,9 @@ def run_graph(args, llm) -> None:
                 next_event.cancel()
                 turns.pop(current).cancel()
                 queues.pop(current, None)
-            if not finished_cleanly and "agent" in agent_holder:
-                await agent_holder["agent"].forget(current)
+            if not finished_cleanly and "ready" in host and host["ready"].done() \
+                    and not host["ready"].exception():
+                await host["ready"].result().forget(current)
             yield {**busy(False), confirm_panel: gr.update(visible=False), status: "",
                    past: past_chats(current) | {"interactive": True}}
 
@@ -367,7 +419,20 @@ def run_graph(args, llm) -> None:
         new_chat.click(start_new_chat, None, [chat_id, chatbot, past])
         demo.load(past_chats, None, [past])
 
-    demo.launch(share=False, css="#chat-history { max-height: 60vh; overflow-y: auto; }")
+    demo.launch(share=False, css="#chat-history { max-height: 60vh; overflow-y: auto; }", prevent_thread_lock=True)
+    try:
+        while True:  # the web server runs in its own thread; this one waits for Ctrl+C
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        print("\nClosing...")
+    finally:
+        loop = host.get("loop")
+        if loop is not None and loop.is_running():
+            try:
+                asyncio.run_coroutine_threadsafe(close_agent(), loop).result(timeout=20)
+            except Exception as error:
+                print(f"The MCP server did not close cleanly ({type(error).__name__}).")
+        demo.close()
 
 
 def main(argv=None) -> None:
@@ -378,8 +443,11 @@ def main(argv=None) -> None:
         sys.exit(f"❌ {e}")
     if args.mode == "graph":
         run_graph(args, llm)
-    else:
+        return
+    try:
         asyncio.run(run_text(args, llm))
+    except KeyboardInterrupt:  # Ctrl+C: asyncio has already closed the MCP session in its own task
+        print("\nGoodbye!")
 
 
 if __name__ == "__main__":
