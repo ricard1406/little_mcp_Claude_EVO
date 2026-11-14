@@ -12,6 +12,8 @@
   Gradio is now a required dependency, and the `ui` extra is gone.
 - **The web UI asks before changing data**, with Allow and Decline buttons and the whole
   change on screen. Before, it could only block changes or allow them all.
+- **Prompt caching for Claude:** the tool descriptions, the instructions and the conversation so
+  far are cached for 5 minutes, so later model calls read them back at a fraction of the price.
 - **Token usage:** a line under the chat (and after each answer in the terminal) shows the
   tokens read and written, for the last answer and the whole chat, with Claude's cached part.
 - Ctrl+C on the HTTP server stops it cleanly, even while a client such as Claude Code keeps

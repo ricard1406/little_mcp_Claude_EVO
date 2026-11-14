@@ -169,3 +169,16 @@ async def test_no_usage_event_when_the_model_reports_nothing():
     async with LittleAgent(ScriptedModel(replies=[AIMessage("Hi")], seen=[])) as agent:
         events = [e async for e in agent.stream("Hello")]
     assert [e.kind for e in events] == ["answer"]
+
+
+def test_prompt_caching_only_for_claude():
+    from langchain_anthropic import ChatAnthropic
+    from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
+    from langchain_ollama import ChatOllama
+
+    from little_mcp.agent import _prompt_caching
+
+    caching = _prompt_caching(ChatAnthropic(model="claude-opus-5-5", api_key="not-a-real-key"))
+    assert isinstance(caching, AnthropicPromptCachingMiddleware) and caching.ttl == "5m"
+    assert _prompt_caching(ChatOllama(model="qwen3:4b")) is None
+    assert _prompt_caching(ScriptedModel(replies=[])) is None

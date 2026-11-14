@@ -191,6 +191,31 @@ def _server_env() -> dict[str, str]:
     return env
 
 
+def _prompt_caching(llm):
+    """Prompt caching for Claude, or None for any other model.
+
+    Every model call sends the same start: the tool descriptions (about 1,800
+    tokens), the instructions, then the conversation so far. With caching,
+    Claude keeps that start for 5 minutes and reads it back at a fraction of
+    the price, instead of processing it again. LangChain's middleware marks the
+    tools and the instructions as fixed cache points, and turns on automatic
+    caching for the growing conversation.
+
+    The cache lives 5 minutes, and every use resets the timer: the calls of one
+    answer are seconds apart, and so are the answers of a lively chat. A
+    1-hour cache costs twice as much to write, and pays off only for pauses
+    between 5 and 60 minutes.
+    """
+    try:
+        from langchain_anthropic import ChatAnthropic
+        from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
+    except ImportError:  # Claude support is not installed, so this is not Claude
+        return None
+    if not isinstance(llm, ChatAnthropic):
+        return None
+    return AnthropicPromptCachingMiddleware(ttl="5m")
+
+
 def _add_usage(usage: dict, msg: AIMessage) -> None:
     """Adds one model call's token counts to the turn's totals.
 
@@ -262,6 +287,8 @@ class LittleAgent:
         write_tools.update(t.name for t in self.tools if not (t.metadata or {}).get("readOnlyHint", False))
 
         middleware = [ModelCallLimitMiddleware(run_limit=15, exit_behavior="end")]
+        if caching := _prompt_caching(self.llm):
+            middleware.append(caching)
         if self.trim_history:
             middleware.append(KeepRecentMessages())
         self._graph = create_agent(

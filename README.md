@@ -203,9 +203,18 @@ Tokens · this answer: 4,250 in, 50 out · this chat: 8,500 in, 100 out
   and each call reads it all again, so "in" is usually much larger than "out".
 - **Out** is what the model writes: tool calls and the answer, and with a local
   thinking model, its reasoning too.
-- With Claude, the line also says how much of the input came from its **cache**,
-  which costs less. Prices change, so the line shows tokens, not money: see
+- With Claude, the line also says how much of the input came from its **cache**.
+  Prices change, so the line shows tokens, not money: see
   [Anthropic's pricing](https://www.anthropic.com/pricing).
+
+**Prompt caching (Claude only).** Every model call starts the same way: the tool
+descriptions, the instructions, then the conversation so far. Little MCP asks
+Claude to keep that start for 5 minutes and read it back from its cache, which
+is much cheaper and faster than processing it again. The first call of a chat
+writes the cache (that costs a little more than normal input), and the calls
+after it read it. Each use resets the 5 minutes, so the cache stays warm while
+you chat; after a longer pause, the next answer writes it again. Ollama runs on
+your own computer, so there's nothing to cache there.
 
 The counts are saved with each chat, so a reopened chat shows its total.
 
