@@ -325,7 +325,7 @@ def books(tmp_path):
 def test_a_value_too_long_fits_after_modify(books):
     """What happened on the test machine: YEAR NUMBER(4) cannot hold a period."""
     failed = books.execute("INSERT INTO BOOKS VALUES ('I Promessi Sposi', '1840-1842', 'Alessandro Manzoni')")
-    assert failed.failed and "too long for column YEAR" in failed.message
+    assert failed.failed and "'1840-1842' is not a number (column YEAR)" in failed.message
     assert books.execute("ALTER TABLE BOOKS MODIFY YEAR CHAR(20)").message == (
         "column YEAR of BOOKS is now CHAR(20) (row length 70)")
     assert not books.execute("INSERT INTO BOOKS VALUES ('I Promessi Sposi', '1840-1842', 'Alessandro Manzoni')").failed
@@ -399,3 +399,92 @@ def test_an_id_added_later_would_not_be_first(tmp_path):
     session.execute("CREATE TABLE T (NAME CHAR(5))")
     result = session.execute("ALTER TABLE T ADD ID NUMBER(10)")
     assert result.failed and "must be the first" in result.message
+
+
+# --- Decimal numbers (Python only) ----------------------------------------------------------
+
+from decimal import Decimal  # noqa: E402
+
+from little_mcp.tinysql.util import check_number, parse_number  # noqa: E402
+
+
+@pytest.mark.parametrize("text, number", [
+    ("42", 42), (" -7 ", -7), ("1338.80", Decimal("1338.80")), ("+0.5", Decimal("0.5")), ("-12.25", Decimal("-12.25")),
+    ("1.338,80", None), ("1,5", None), (".5", None), ("5.", None), ("1e3", None), ("12 3", None), ("", None),
+])
+def test_parse_number(text, number):
+    assert parse_number(text) == number
+
+
+def test_a_price_in_italian_format_gets_a_hint():
+    with pytest.raises(SqlError, match=r"'1\.338,80' is not a number \(column ASML\): write it like 1338\.80"):
+        check_number("1.338,80", "ASML")
+    assert check_number(" 1338.80 ", "ASML") == "1338.80" and check_number("", "ASML") == ""
+
+
+@pytest.fixture
+def prices(tmp_path):
+    session = Session(_fresh(tmp_path))
+    session.execute("CREATE TABLE STOCKS (ID NUMBER(10), DAY DATE, ASML NUMBER(10), AXA NUMBER(10))")
+    for day, asml, axa in [("2026-11-13", "1338.80", "47.10"), ("2026-11-12", "1376.80", "46.58"),
+                           ("2026-11-05", "1250.00", "45.71"), ("2026-11-04", "", "45.00")]:
+        assert not session.execute(f"INSERT INTO STOCKS VALUES ('{day}', '{asml}', '{axa}')").failed
+    return session
+
+
+def test_decimals_compare_as_numbers(prices):
+    assert rows(prices, "SELECT DAY FROM STOCKS WHERE ASML > 1300") == [["2026-11-13"], ["2026-11-12"]]
+    assert rows(prices, "SELECT DAY FROM STOCKS WHERE AXA >= 46.58") == [["2026-11-13"], ["2026-11-12"]]
+    assert rows(prices, "SELECT DAY FROM STOCKS WHERE ASML = 1250") == [["2026-11-05"]]  # 1250.00 = 1250
+    # As text, "999.9" would sort after "1338.80"; as numbers it doesn't.
+    assert rows(prices, "SELECT DAY FROM STOCKS WHERE ASML < 999.9") == []
+    assert rows(prices, "SELECT DAY FROM STOCKS WHERE ASML = ''") == [["2026-11-04"]]
+
+
+def test_numbers_are_checked_where_they_go_in(prices):
+    for sql in ["INSERT INTO STOCKS VALUES ('2026-11-14', '1.338,80', '47')",
+                "UPDATE STOCKS SET AXA = 'a lot' WHERE ID = 1",
+                "SELECT * FROM STOCKS WHERE ASML > '1.300,00'"]:
+        result = prices.execute(sql)
+        assert result.failed and "is not a number" in result.message, sql
+
+
+def test_number_takes_one_width():
+    with pytest.raises(SqlError, match=r"NUMBER takes one width, e.g. PRICE NUMBER\(10\)"):
+        parse_statement("CREATE TABLE T (PRICE NUMBER(10,2))")
+
+
+def test_text_prices_become_numbers(tmp_path):
+    """The table from the fresh-machine test: prices stored as text, then converted."""
+    session = Session(_fresh(tmp_path))
+    session.execute("CREATE TABLE STOCK_PRICES (ID NUMBER(10), DAY DATE, ASML CHAR(20))")
+    session.execute("INSERT INTO STOCK_PRICES VALUES ('2026-11-13', '1.338,80')")
+    session.execute("INSERT INTO STOCK_PRICES VALUES ('2026-11-05', '1.250,00')")
+    refused = session.execute("ALTER TABLE STOCK_PRICES MODIFY ASML NUMBER(10)")
+    assert refused.failed and "'1.338,80' is not a number" in refused.message and "ID 1" in refused.message
+    session.execute("UPDATE STOCK_PRICES SET ASML = '1338.80' WHERE ID = 1")
+    session.execute("UPDATE STOCK_PRICES SET ASML = '1250.00' WHERE ID = 2")
+    assert session.execute("ALTER TABLE STOCK_PRICES MODIFY ASML NUMBER(10)").message == (
+        "column ASML of STOCK_PRICES is now NUMBER(10) (row length 30)")
+    assert rows(session, "SELECT DAY FROM STOCK_PRICES WHERE ASML > 1300") == [["2026-11-13"]]
+
+
+# --- The console -------------------------------------------------------------------------------
+
+
+def test_the_console_runs_what_you_type(tmp_path, monkeypatch, capsysbinary):
+    from little_mcp.tinysql import __main__ as console
+
+    db = Database(tmp_path / "db")
+    typed = iter(["CREATE TABLE T (ID NUMBER(10), N CHAR(5))", "INSERT INTO T VALUES (Ada)", "SELECT * FROM T", "exit"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(typed))
+    assert console.run_console(db) == 0
+    out = capsysbinary.readouterr().out.decode()
+    assert "1 row inserted into T with ID 1" in out and "1          Ada" in out
+
+
+def test_the_console_says_where_there_is_no_database(tmp_path, capsys):
+    from little_mcp.tinysql import __main__ as console
+
+    assert console.main(["--data", str(tmp_path)]) == 2
+    assert "no database" in capsys.readouterr().err

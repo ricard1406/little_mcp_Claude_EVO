@@ -12,6 +12,10 @@
   Gradio is now a required dependency, and the `ui` extra is gone.
 - **The web UI asks before changing data**, with Allow and Decline buttons and the whole
   change on screen. Before, it could only block changes or allow them all.
+- **Decimal numbers:** `NUMBER` holds values like `1338.80`, they compare as numbers, and a
+  value that isn't a number is refused with a hint (`1.338,80` → `1338.80`).
+- **SQL console:** `python -m little_mcp.tinysql` opens your tables, with arrow-key history,
+  and is safe to use while the chat is running.
 - **New type `DATE`** (`YYYY-MM-DD`) and the word `TODAY`, which follows your time zone
   (`LITTLE_MCP_TIMEZONE` in `.env`). `get_datetime` uses the same zone for local time.
 - **`ALTER TABLE ... ADD`** and **`ALTER TABLE ... MODIFY`:** add a column, or change a

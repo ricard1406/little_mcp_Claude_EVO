@@ -387,6 +387,11 @@ class Parser:
         width = parse_integer(width_text)
         if width is None or width < 1:
             raise SqlError(f'invalid width "{width_text}" for column {name}: expected a positive number')
+        if self.peek() == Symbol(","):  # NUMBER(10,2), as in Oracle (Python only: a clearer message)
+            raise SqlError(
+                f"{kind} takes one width, e.g. {name} {kind}({width}): a NUMBER holds decimals like "
+                "1338.80 without a fixed number of decimal places, and the width counts every character"
+            )
         self.expect_symbol(")")
         return ColumnDefinition(name, "S1" if kind == "CHAR" else "N1", width)
 

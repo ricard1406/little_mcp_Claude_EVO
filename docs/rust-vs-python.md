@@ -21,15 +21,15 @@ messages and the same files on disk. Only the language changes.
 
 | Rust | Python | Lines | Notes |
 | --- | --- | --- | --- |
-| `util.rs` | `util.py` | 147 → 104 | `SqlError` becomes an exception; the unit tests moved to `tests/` |
+| `util.rs` | `util.py` | 147 → 135 | `SqlError` becomes an exception; the unit tests moved to `tests/` |
 | `statement.rs` | `statement.py` | 156 → 169 | One dataclass per variant |
-| `parser.rs` | `parser.py` | 562 → 472 | Same tokenizer and recursive descent |
+| `parser.rs` | `parser.py` | 562 → 477 | Same tokenizer and recursive descent |
 | `catalog.rs` | `catalog.py` | 177 → 117 | |
 | `table_file.rs` | `table_file.py` | 234 → 170 | Lines are `bytearray`, see section 3 |
-| `session.rs` | `session.py` | 476 → 492 | `ResultSet` keeps only what the console needs |
+| `session.rs` | `session.py` | 476 → 509 | `ResultSet` keeps only what the console needs |
 | `output.rs` | `output.py` | 169 → 37 | No JSON: there is no browser server |
 | `server.rs` | (none) | 287 → 0 | The engine lives inside the MCP server, so it needs no port of its own |
-| `main.rs` | `__main__.py` | 210 → 68 | Without the server options |
+| `main.rs` | `__main__.py` | 210 → 86 | Without the server options |
 | (none) | `dates.py` | 0 → 68 | Only in Python, see section 8 |
 | (none) | `database.py` | 0 → 194 | Only in Python, see section 7 |
 
@@ -183,3 +183,23 @@ library has no time zones), and an empty date passes no comparison, like `NULL` 
 `ALTER TABLE` shows the price of fixed-width rows: there is no free space, so changing one column's width moves
 every column after it, in every row. The engine prepares both files in memory, checks everything, and only then
 replaces them. The window between the two replacements is the next thing a journal would close.
+
+## 9. Decimal numbers: when text order is wrong
+
+The C++ and Rust versions compare two values as numbers only when both are whole numbers. Anything else is
+compared as text, character by character. For whole numbers that is enough. For prices it is not:
+
+```text
+> SELECT DAY FROM STOCKS WHERE ASML > 1000          (the Rust program)
+2026-11-13        ASML = 1338.80   right
+2026-11-05        ASML = 999.50    wrong: as text, "9" comes after "1"
+```
+
+The Python version adds `parse_number()`, which also reads a decimal written with a point, and compares with
+`Decimal`, Python's exact decimal type. A `float` would not do for money: `0.1 + 0.2` is `0.30000000000000004`
+as a float, and exactly `0.3` as a `Decimal`.
+
+Values in a `NUMBER` column are now checked when they go in, as dates are, so `1.338,80` (the Italian way of
+writing 1338.80) is refused with a hint instead of being stored as text that never compares correctly. The C++
+and Rust versions accept any text in a `NUMBER` column. All 8 golden scripts still pass with the check, so none
+of them relied on that.

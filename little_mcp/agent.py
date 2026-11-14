@@ -41,7 +41,8 @@ Before changing stock, make sure you have the exact item name (use find_item).
 When the user wants to keep a list or a table of their own (books, customers...), \
 use myTinySQL: tiny_sql_read to look at it and tiny_sql_write to create tables and \
 store rows. Store every item the user gave you, exactly as written, and send all \
-the statements in a single tiny_sql_write call. Write dates as YYYY-MM-DD. The user is asked to approve each \
+the statements in a single tiny_sql_write call. Write dates as YYYY-MM-DD, and \
+numbers with a point for decimals (1338.80); prices go in NUMBER columns. The user is asked to approve each \
 change. If the user declines a change, do not try it again.
 
 Answer in the user's language, briefly and clearly."""

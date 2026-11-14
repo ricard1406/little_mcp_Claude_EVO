@@ -340,11 +340,18 @@ same statements, the same messages and the same files on disk. Your tables are
 in `data/tinysql/`, one fixed-width text file each, and all three programs can
 read them. [docs/rust-vs-python.md](docs/rust-vs-python.md) compares the code.
 
-You can use it without the AI:
+### The SQL console
+
+To look at your tables yourself, without the AI, open the console in a second terminal:
 
 ```bash
-python -m little_mcp.tinysql --data=data/tinysql
+python -m little_mcp.tinysql
 ```
+
+Type a statement and press Enter, for example `DESCRIBE` or `SELECT * FROM BOOKS`.
+The arrow keys bring back earlier statements, and `exit` or Ctrl+D quits. It is
+safe to use while the chat is running. There is no Allow question here: what you
+type runs, so take care with `UPDATE` and `DELETE`.
 
 ### Your own tables
 
@@ -361,17 +368,25 @@ of statement, not by looking at the text. The dialect is small on purpose, for
 now: there is no `AND`, `ORDER BY`, `COUNT`, `JOIN` or `DROP TABLE`. The model
 gets an error message saying what isn't supported, and can work around it.
 
-### Dates, and changing a table
+### Dates, decimals, and changing a table
 
-The Python version adds two things to the dialect (C++ and Rust don't have them yet):
+The Python version adds these to the dialect (C++ and Rust don't have them yet):
 
 ```sql
 CREATE TABLE TASKS (ID NUMBER(10), WHAT CHAR(40), DUE DATE)
 INSERT INTO TASKS VALUES ('Call Dianne', TODAY)
 SELECT WHAT FROM TASKS WHERE DUE < TODAY
+INSERT INTO STOCKS VALUES ('2026-11-13', 1338.80)
+SELECT DAY FROM STOCKS WHERE ASML > 1300
 ALTER TABLE BOOKS MODIFY YEAR CHAR(20)
 ALTER TABLE BOOKS ADD BOUGHT DATE
 ```
+
+- **`NUMBER`** holds whole and decimal numbers, written with a point and no
+  thousands separators: `1338.80`, not `1.338,80`. The AI converts what you type,
+  and can show it back to you the Italian way. Numbers compare as numbers, so
+  `999.50` is less than `1000`. The width counts every character, including the
+  point and a minus sign. A value that isn't a number is refused.
 
 - **`DATE`** stores one day as `YYYY-MM-DD`. It has no time zone, because a
   birthday or a deadline is the same day everywhere. Only **`TODAY`** depends on

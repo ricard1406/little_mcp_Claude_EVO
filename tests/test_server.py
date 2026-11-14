@@ -141,7 +141,7 @@ async def test_a_column_too_small_can_be_widened_with_the_tools():
                                                           "AUTHOR CHAR(100), YEAR NUMBER(4))"})
         insert = "INSERT INTO BOOKS VALUES ('I Promessi Sposi', 'Alessandro Manzoni', '1840-1842')"
         refused = await session.call_tool("tiny_sql_write", {"sql": insert})
-        assert refused.isError and "too long for column YEAR" in refused.content[0].text
+        assert refused.isError and "not a number (column YEAR)" in refused.content[0].text
         fixed = await session.call_tool("tiny_sql_write", {"sql": "ALTER TABLE BOOKS MODIFY YEAR CHAR(20)\n" + insert})
         assert not fixed.isError, fixed.content[0].text
         rows = data(await session.call_tool("tiny_sql_read", {"sql": "SELECT YEAR FROM BOOKS"}))

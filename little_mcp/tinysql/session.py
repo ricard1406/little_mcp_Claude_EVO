@@ -27,7 +27,7 @@ from .statement import (
     UpdateStmt,
 )
 from .table_file import TableFile, replace_file
-from .util import SqlError, ascii_upper, byte_len, matches_like, parse_integer, same_name, trim
+from .util import SqlError, ascii_upper, byte_len, check_number, matches_like, parse_number, same_name, trim
 
 MAX_NAME_LENGTH = 20
 """Longest table or column name: the width of the TABLE and FIELD columns of SYSTEM_TABLE."""
@@ -61,22 +61,25 @@ class StatementResult:
     silent: bool = False  # True for COLUMN and comments: nothing to show
 
 
-def _matches(field_value: str, condition: Condition, is_date: bool = False) -> bool:
+def _matches(field_value: str, condition: Condition, typed: bool = False) -> bool:
     """Applies a WHERE test to one value.
 
     LIKE matches a pattern, ignoring case. The other operators compare numbers
-    as numbers when both sides are integers, otherwise as case-sensitive text.
-    Dates are text in the form YYYY-MM-DD, which sorts in the same order as time.
-    An empty date means "no date": like NULL in SQL, it never passes a comparison,
-    except `= ''`, which is how you find it.
+    as numbers when both sides are numbers (whole, or decimal like 1338.80),
+    otherwise as case-sensitive text. Dates are text in the form YYYY-MM-DD,
+    which sorts in the same order as time.
+
+    In a DATE or NUMBER column (`typed`), an empty value means "no value": like
+    NULL in SQL, it never passes a comparison, except `= ''`, which is how you
+    find it. Otherwise an empty price would count as smaller than every price.
     """
     if condition.op is Operator.LIKE:
         return matches_like(field_value, condition.value)
-    if is_date and trim(field_value) == "" and trim(condition.value) != "":
+    if typed and trim(field_value) == "" and trim(condition.value) != "":
         return False
 
-    left: int | str | None = parse_integer(field_value)
-    right: int | str | None = parse_integer(condition.value)
+    left = parse_number(field_value)
+    right = parse_number(condition.value)
     if left is None or right is None:
         left, right = trim(field_value), trim(condition.value)
 
@@ -122,8 +125,16 @@ def _check_name(name: str, what: str) -> None:
         )
 
 
+NUMBER_KIND = "N1"
+
+
 def _is_date(column: Column) -> bool:
     return column.kind == DATE_KIND
+
+
+def _is_typed(column: Column) -> bool:
+    """DATE and NUMBER columns check their values (in the Python version; C++ and Rust accept any text)."""
+    return column.kind in (DATE_KIND, NUMBER_KIND)
 
 
 def _layout(name: str, definitions: list[ColumnDefinition]) -> TableSchema:
@@ -169,20 +180,26 @@ class Session:
         self.timezone = timezone
         self.clock = clock or (lambda: None)  # None: check_date asks the system clock
 
-    def _date(self, value: str, column: Column) -> str:
-        return check_date(value, column.name, self.timezone, self.clock())
+    def _value(self, value: str, column: Column) -> str:
+        """A value checked for its column's type, as it will be stored (TODAY becomes a date)."""
+        if column.kind == DATE_KIND:
+            return check_date(value, column.name, self.timezone, self.clock())
+        if column.kind == NUMBER_KIND:
+            return check_number(value, column.name)
+        return value
 
     def _where(self, schema: TableSchema, condition: Condition) -> tuple[int, Condition, bool]:
         """The WHERE column's index, the condition ready to test, and whether the column is a DATE.
 
-        On a DATE column the value must be a date (or TODAY), so a mistake such as
-        13/11/2026 is an error instead of a search that silently finds nothing.
+        On a DATE column the value must be a date (or TODAY), and on a NUMBER column
+        a number, so a mistake such as 13/11/2026 or 1.338,80 is an error instead of
+        a search that silently finds the wrong rows.
         """
         index = _column_index(schema, condition.column)
         column = schema.columns[index]
-        if _is_date(column) and condition.op is not Operator.LIKE:
-            condition = replace(condition, value=self._date(condition.value, column))
-        return index, condition, _is_date(column)
+        if _is_typed(column) and condition.op is not Operator.LIKE:
+            condition = replace(condition, value=self._value(condition.value, column))
+        return index, condition, _is_typed(column)
 
     def execute(self, sql: str) -> StatementResult:
         """Parses and runs one statement. Errors never escape: a failure gives a result with `failed` set."""
@@ -285,7 +302,7 @@ class Session:
             rows = file.read_rows() if data_file.exists() else []
             if any(row[0] == values[0] for row in rows):
                 raise SqlError(f"table {schema.name} already has a row with ID {values[0]}")
-        values = [self._date(v, c) if _is_date(c) else v for v, c in zip(values, schema.columns)]
+        values = [self._value(v, c) for v, c in zip(values, schema.columns)]
         file.append(values)
 
         message = f"1 row inserted into {schema.name}"
@@ -305,7 +322,7 @@ class Session:
             if index == 0 and schema.has_auto_id():
                 raise SqlError("the ID column cannot be changed: rows are found by their ID")
             column = schema.columns[index]
-            new_values.append((index, self._date(assignment.value, column) if _is_date(column) else assignment.value))
+            new_values.append((index, self._value(assignment.value, column)))
         where_index, condition, is_date = self._where(schema, stmt.condition)
 
         updated = TableFile(schema, catalog.data_file(schema)).update_rows(
@@ -449,8 +466,8 @@ class Session:
         for row in rows:
             where = f" (row with ID {row[0]})" if schema.has_auto_id() else ""
             try:
-                if _is_date(column) and not _is_date(old_column):
-                    row[index] = self._date(row[index], column)
+                if column.kind != old_column.kind:  # e.g. CHAR to NUMBER: every value must be a number
+                    row[index] = self._value(row[index], column)
                 if byte_len(row[index]) > column.width:
                     raise SqlError(
                         f"value '{row[index]}' is too long for column {column.name} "

@@ -235,7 +235,7 @@ def tiny_sql_read(sql: str) -> dict:
       SELECT <col>,<col> FROM <table> WHERE <col> <op> 'value'
 
     <op> is = != < <= > >= or LIKE (LIKE ignores case; % is any text, _ one letter).
-    A number compares as a number. A DATE compares as a date: write 'YYYY-MM-DD'
+    A number compares as a number (decimals too: WHERE PRICE > 1300.5). A DATE compares as a date: write 'YYYY-MM-DD'
     or TODAY, e.g. WHERE DUE < TODAY. An empty date matches only = ''.
     WHERE takes one condition. There is no AND, OR, ORDER BY, COUNT or JOIN:
     read the rows and work out the rest yourself.
@@ -261,8 +261,13 @@ def tiny_sql_write(sql: str) -> dict:
     Rules:
     - A first column called ID is numbered automatically: leave it out of INSERT.
     - Names: up to 20 letters, digits, _ or -, starting with a letter.
-    - The types are CHAR, NUMBER and DATE. Use NUMBER only for plain whole numbers,
-      DATE for a single day, and CHAR for anything else (a period like '1840-1842').
+    - The types are CHAR, NUMBER and DATE. Use NUMBER for any number, whole or
+      decimal (prices, amounts), DATE for a single day, and CHAR for anything else
+      (a period like '1840-1842').
+    - A NUMBER is written with a point for decimals and no thousands separators:
+      convert the Italian 1.338,80 to 1338.80. NUMBER(<width>) counts every
+      character, so 1338.80 needs NUMBER(7) or more. There is no NUMBER(10,2).
+      Show numbers and dates to the user in their own format if they prefer.
     - A DATE is written 'YYYY-MM-DD' (convert 13/11/2026 to '2026-11-13'), or TODAY
       for the user's today. '' means no date.
     - Widths are in bytes and a longer value is refused, so be generous, for

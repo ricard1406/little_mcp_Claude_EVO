@@ -6,9 +6,11 @@ takes 2 bytes on disk, so anything about widths goes through byte_len().
 """
 
 import re
+from decimal import Decimal
 
 SPACES = " \t\r\n"
 _INTEGER = re.compile(r"-?[0-9]+")
+_DECIMAL = re.compile(r"-?[0-9]+\.[0-9]+")
 _I64_MIN, _I64_MAX = -(2**63), 2**63 - 1
 
 
@@ -102,3 +104,32 @@ def parse_integer(text: str) -> int | None:
         return None
     value = int(text)
     return value if _I64_MIN <= value <= _I64_MAX else None
+
+
+def parse_number(text: str) -> int | Decimal | None:
+    """Parses a whole number, or a decimal number written with a point such as 1338.80.
+
+    Python only: the C++ and Rust versions compare whole numbers only, and treat
+    1338.80 as text. Decimal keeps the value exact: as a float, 0.1 + 0.2 would
+    not be 0.3, and prices must add up to the cent.
+    """
+    whole = parse_integer(text)
+    if whole is not None:
+        return whole
+    text = trim(text).removeprefix("+")
+    return Decimal(text) if _DECIMAL.fullmatch(text) else None
+
+
+def check_number(value: str, column: str) -> str:
+    """Checks a value for a NUMBER column and returns it as stored: trimmed, otherwise as written.
+
+    '' means "no value". A decimal uses a point and no thousands separator, so
+    1.338,80 (the Italian way) is refused with a hint: the AI converts it.
+    """
+    value = trim(value)
+    if value == "" or parse_number(value) is not None:
+        return value
+    raise SqlError(
+        f"'{value}' is not a number (column {column}): write it like 1338.80, "
+        "with a point for decimals and no thousands separators"
+    )
