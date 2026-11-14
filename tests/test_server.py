@@ -160,3 +160,25 @@ async def test_local_time_follows_the_configured_zone(monkeypatch):
     async with connect() as session:
         result = data(await session.call_tool("get_datetime", {}))
         assert result["timezone"] == "Asia/Tokyo"
+
+
+def test_a_normal_disconnect_is_not_logged_as_an_error(caplog):
+    """The library logs a closed stream at the end of a session as an error; real errors still show."""
+    import logging
+
+    import anyio
+
+    library = logging.getLogger("mcp.server.streamable_http")
+    with caplog.at_level(logging.ERROR, logger="mcp.server.streamable_http"):
+        for error in (anyio.ClosedResourceError(), ValueError("a real problem")):
+            try:
+                raise error
+            except Exception:
+                library.exception("Error in standalone SSE writer")
+        try:
+            raise anyio.ClosedResourceError()
+        except Exception:
+            library.exception("Error in standalone SSE response")
+    shown = [(r.getMessage(), r.exc_info[0].__name__) for r in caplog.records]
+    assert shown == [("Error in standalone SSE writer", "ValueError"),
+                     ("Error in standalone SSE response", "ClosedResourceError")]

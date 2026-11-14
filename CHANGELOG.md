@@ -12,6 +12,8 @@
   Gradio is now a required dependency, and the `ui` extra is gone.
 - **The web UI asks before changing data**, with Allow and Decline buttons and the whole
   change on screen. Before, it could only block changes or allow them all.
+- The HTTP server no longer prints a traceback ("Error in standalone SSE writer") when a
+  client on another computer disconnects normally. It was a false alarm of the MCP library.
 - **Ctrl+C closes cleanly.** The web UI printed pages of errors when stopped, because the MCP
   session was opened in one task and closed in another. The terminal chat waited for Enter
   after Ctrl+C at the prompt. Both now quit at once.

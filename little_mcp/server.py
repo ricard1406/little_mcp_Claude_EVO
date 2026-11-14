@@ -16,6 +16,7 @@ import sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import anyio
 import requests
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
@@ -31,6 +32,27 @@ logging.basicConfig(level=logging.INFO, stream=sys.stderr, format="  [server] %(
 for noisy in ("mcp", "httpx", "chromadb"):
     logging.getLogger(noisy).setLevel(logging.WARNING)
 log = logging.getLogger("little_mcp")
+
+
+class _QuietSessionEnd(logging.Filter):
+    """Hides one false alarm of the MCP library (mcp 1.30) in HTTP mode.
+
+    When a client ends its session normally, the server closes the session's
+    message stream. If the helper that feeds the client's event stream is still
+    waiting on it, it gets ClosedResourceError, and the library logs that as
+    "Error in standalone SSE writer" with a full traceback. Nothing went wrong.
+    It depends on network timing: seen between two computers, never on one.
+
+    Only that message with that cause is hidden; any other error still shows.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        error = record.exc_info[1] if record.exc_info else None
+        return not (record.getMessage() == "Error in standalone SSE writer"
+                    and isinstance(error, anyio.ClosedResourceError))
+
+
+logging.getLogger("mcp.server.streamable_http").addFilter(_QuietSessionEnd())
 
 mcp = FastMCP(
     "little-mcp",
