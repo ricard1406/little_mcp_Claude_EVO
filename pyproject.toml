@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "little-mcp-evo"
-version = "0.6.0"
+version = "0.7.0"
 description = "A small, local-first AI agent built on a real Model Context Protocol server."
 readme = "README.md"
 license = "MIT"
