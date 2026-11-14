@@ -312,16 +312,56 @@ def tiny_sql_write(sql: str) -> dict:
 # --- Entry point --------------------------------------------------------------
 
 
+class _QuietShutdown(logging.Filter):
+    """Hides uvicorn's "ASGI callable returned without completing response" while the server stops.
+
+    A client such as Claude Code keeps a connection open to listen for the
+    server's messages. Ctrl+C cuts it, and uvicorn reports the unfinished answer
+    as an error. While stopping, that is expected; at any other time it could
+    be a real bug, so then it still shows.
+    """
+
+    def __init__(self, server):
+        super().__init__()
+        self.server = server
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not (self.server.should_exit
+                    and record.getMessage() == "ASGI callable returned without completing response.")
+
+
+def serve_http() -> None:
+    """What mcp.run(transport="streamable-http") does, with a clean Ctrl+C.
+
+    uvicorn handles Ctrl+C itself: it stops gracefully, then raises Ctrl+C
+    again so the program ends. Nothing caught it, so Python printed a traceback.
+    Starting uvicorn here also lets the filter above know when it is stopping.
+    """
+    import uvicorn
+
+    server = uvicorn.Server(uvicorn.Config(mcp.streamable_http_app(), host=config.MCP_HOST, port=config.MCP_PORT,
+                                          log_level=mcp.settings.log_level.lower()))
+    logging.getLogger("uvicorn.error").addFilter(_QuietShutdown(server))
+    log.info("Little MCP server on http://%s:%s/mcp (Ctrl+C to stop)", config.MCP_HOST, config.MCP_PORT)
+    try:
+        anyio.run(server.serve)
+    except KeyboardInterrupt:
+        pass
+    log.info("Stopped.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Little MCP server")
     parser.add_argument("--transport", choices=["stdio", "http"], default="stdio",
                         help="stdio (default): a client starts the server. http: run it standalone.")
     args = parser.parse_args()
     if args.transport == "http":
-        log.info("Little MCP server on http://%s:%s/mcp", config.MCP_HOST, config.MCP_PORT)
-        mcp.run(transport="streamable-http")
-    else:
+        serve_http()
+        return
+    try:
         mcp.run(transport="stdio")
+    except KeyboardInterrupt:  # Ctrl+C in the terminal chat reaches this child process too
+        pass
 
 
 if __name__ == "__main__":

@@ -182,3 +182,25 @@ def test_a_normal_disconnect_is_not_logged_as_an_error(caplog):
     shown = [(r.getMessage(), r.exc_info[0].__name__) for r in caplog.records]
     assert shown == [("Error in standalone SSE writer", "ValueError"),
                      ("Error in standalone SSE response", "ClosedResourceError")]
+
+
+def test_the_shutdown_message_is_hidden_only_while_stopping(caplog):
+    import logging
+    from types import SimpleNamespace
+
+    from little_mcp.server import _QuietShutdown
+
+    server = SimpleNamespace(should_exit=False)
+    uvicorn_log = logging.getLogger("uvicorn.error.test")
+    quiet = _QuietShutdown(server)
+    uvicorn_log.addFilter(quiet)
+    try:
+        with caplog.at_level(logging.ERROR, logger="uvicorn.error.test"):
+            uvicorn_log.error("ASGI callable returned without completing response.")  # running: a real problem
+            server.should_exit = True
+            uvicorn_log.error("ASGI callable returned without completing response.")  # stopping: expected
+            uvicorn_log.error("Something else went wrong.")
+    finally:
+        uvicorn_log.removeFilter(quiet)
+    assert [r.getMessage() for r in caplog.records] == [
+        "ASGI callable returned without completing response.", "Something else went wrong."]
