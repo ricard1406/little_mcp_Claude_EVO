@@ -144,7 +144,7 @@ def _confirm_writes(write_tools: set[str], confirm: Confirm, declined_message: s
 
 @dataclass
 class Event:
-    kind: str  # "user" | "reasoning" | "tool_call" | "tool_result" | "answer" | "error" | "confirm"
+    kind: str  # "user" | "reasoning" | "tool_call" | "tool_result" | "answer" | "error" | "confirm" | "usage"
     text: str = ""
     tool: str = ""
     args: dict | None = None
@@ -189,6 +189,21 @@ def _server_env() -> dict[str, str]:
     env = get_default_environment()
     env.update({k: v for k, v in os.environ.items() if k.startswith(_SERVER_ENV_PREFIXES)})
     return env
+
+
+def _add_usage(usage: dict, msg: AIMessage) -> None:
+    """Adds one model call's token counts to the turn's totals.
+
+    An answer can take several model calls: one per round of tools, then the
+    answer. Each call reads the whole conversation again, with the tool
+    descriptions, so "input" grows with every round. LangChain reports the same
+    numbers for Claude and Ollama; only Claude has a cache, whose part of the
+    input is counted in "cached" (it is cheaper and faster to read).
+    """
+    counts = msg.usage_metadata or {}
+    usage["input"] += counts.get("input_tokens") or 0
+    usage["output"] += counts.get("output_tokens") or 0
+    usage["cached"] += (counts.get("input_token_details") or {}).get("cache_read") or 0
 
 
 def _remembered(records: list[dict]) -> list:
@@ -271,12 +286,14 @@ class LittleAgent:
         if thread_id not in self._threads:
             self._threads.add(thread_id)
             messages[:0] = _remembered(earlier or [])
+        usage = {"input": 0, "output": 0, "cached": 0}
         async for update in self._graph.astream(
             {"messages": messages}, config_, stream_mode="updates"
         ):
             for node_output in update.values():
                 for msg in (node_output or {}).get("messages", []):
                     if isinstance(msg, AIMessage):
+                        _add_usage(usage, msg)
                         if reasoning := _reasoning(msg):
                             yield Event("reasoning", reasoning)
                         for call in msg.tool_calls:
@@ -286,6 +303,8 @@ class LittleAgent:
                     elif isinstance(msg, ToolMessage):
                         yield Event("tool_result", _tool_text(msg), tool=msg.name or "",
                                     is_error=msg.status == "error", call_id=msg.tool_call_id)
+        if usage["input"] or usage["output"]:
+            yield Event("usage", args=usage)
 
     async def forget(self, thread_id: str) -> None:
         """Clear a conversation from the model's memory, after a turn that was stopped or failed.

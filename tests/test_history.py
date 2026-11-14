@@ -56,3 +56,14 @@ def test_a_line_cut_by_a_crash_is_skipped(history):
 def test_a_chat_id_cannot_leave_the_folder(history, bad):
     with pytest.raises(ValueError):
         history.load(bad)
+
+
+def test_token_usage_is_saved_and_added_up(history):
+    from little_mcp.history import usage_totals
+
+    history.save("c", Event("user", "q1"))
+    history.save("c", Event("usage", args={"input": 1800, "output": 40, "cached": 0}))
+    history.save("c", Event("user", "q2"))
+    history.save("c", Event("usage", args={"input": 2100, "output": 60, "cached": 1500}))
+    assert usage_totals(history.load("c")) == {"input": 3900, "output": 100, "cached": 1500}
+    assert usage_totals([]) == {"input": 0, "output": 0, "cached": 0}

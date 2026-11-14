@@ -187,6 +187,28 @@ dropped yet, and before `UPDATE`, `DELETE` and stock changes, because they chang
 existing data. Your own parser makes the call here too: a `DELETE` hidden among
 the `INSERT`s brings the question back. `--allow-writes` is the same as `--ask never`.
 
+### Token usage
+
+Under the chat, a line shows how many tokens the model read and wrote, for the
+last answer and for the whole chat. The terminal chat prints the same line
+after each answer:
+
+```
+Tokens · this answer: 4,250 in, 50 out · this chat: 8,500 in, 100 out
+```
+
+- **In** is everything the model reads: its instructions, the descriptions of
+  all the tools (about 1,800 tokens), the conversation so far and the tool
+  results. One answer can take several model calls, one per round of tools,
+  and each call reads it all again, so "in" is usually much larger than "out".
+- **Out** is what the model writes: tool calls and the answer, and with a local
+  thinking model, its reasoning too.
+- With Claude, the line also says how much of the input came from its **cache**,
+  which costs less. Prices change, so the line shows tokens, not money: see
+  [Anthropic's pricing](https://www.anthropic.com/pricing).
+
+The counts are saved with each chat, so a reopened chat shows its total.
+
 ### Chat history
 
 Every conversation is saved, in the web UI and in the terminal. The web UI lists

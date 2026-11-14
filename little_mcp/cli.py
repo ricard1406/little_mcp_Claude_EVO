@@ -16,7 +16,7 @@ from collections import defaultdict
 
 from . import __version__
 from .agent import DEFAULT_CLAUDE_MODEL, DEFAULT_OLLAMA_MODEL, Event, LittleAgent, build_llm
-from .history import ChatHistory
+from .history import ChatHistory, usage_totals
 from .tinysql.database import only_inserts
 
 EXAMPLES = [
@@ -71,6 +71,20 @@ def parse_args(argv=None):
 def _short(value, limit=300) -> str:
     text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
     return text if len(text) <= limit else text[:limit] + "..."
+
+
+def describe_usage(turn: dict | None, chat: dict) -> str:
+    """One line about tokens, e.g. "this answer: 2,431 in, 312 out · this chat: 10,234 in, 1,020 out"."""
+    def counts(usage: dict) -> str:
+        text = f"{usage['input']:,} in, {usage['output']:,} out"
+        if usage.get("cached"):
+            text += f" ({usage['cached']:,} of the input from the cache)"
+        return text
+
+    parts = [f"this answer: {counts(turn)}"] if turn else []
+    if chat["input"] or chat["output"]:
+        parts.append(f"this chat: {counts(chat)}")
+    return "Tokens · " + " · ".join(parts) if parts else ""
 
 
 # --- Terminal chat --------------------------------------------------------------
@@ -134,6 +148,7 @@ async def run_text(args, llm) -> None:
 
     history = ChatHistory()
     chat_id = history.new_id()
+    chat_usage = {"input": 0, "output": 0, "cached": 0}
     async with LittleAgent(llm, args.server_url, confirm, trim_history=args.provider == "ollama") as agent:
         _banner(args, agent)
         print("Try:\n" + "\n".join(f"  - {e}" for e in EXAMPLES[:4]))
@@ -151,6 +166,10 @@ async def run_text(args, llm) -> None:
             try:
                 async for event in agent.stream(question, chat_id):
                     history.save(chat_id, event)
+                    if event.kind == "usage":
+                        for key in chat_usage:
+                            chat_usage[key] += event.args.get(key, 0)
+                        print(f"  {describe_usage(event.args, chat_usage)}")
                     _print_event(event, args.think)
             except Exception as e:
                 history.save(chat_id, Event("error", f"{type(e).__name__}: {e}"))
@@ -303,6 +322,7 @@ def run_graph(args, llm) -> None:
                         decline = gr.Button("🚫 Decline", variant="stop")
 
                 status = gr.Markdown("")
+                usage_line = gr.Markdown("", elem_id="usage")
 
                 with gr.Row():
                     message = gr.Textbox(placeholder="Write a message...", show_label=False, scale=8, lines=2,
@@ -356,6 +376,7 @@ def run_graph(args, llm) -> None:
             turns[current] = asyncio.create_task(run_turn())
             started = time.monotonic()
             waiting_for_click = False
+            turn_usage = None  # this answer's tokens, from the agent's "usage" event
             next_event = asyncio.ensure_future(queue.get())
             try:
                 while True:
@@ -377,6 +398,8 @@ def run_graph(args, llm) -> None:
                         continue
                     waiting_for_click = False
                     history.save(current, event)
+                    if event.kind == "usage":
+                        turn_usage = event.args
                     add_to_chat(shown, boxes, event, args.think)
                     yield {chatbot: shown, confirm_panel: gr.update(visible=False)}
             finally:
@@ -387,6 +410,7 @@ def run_graph(args, llm) -> None:
                     and not host["ready"].exception():
                 await host["ready"].result().forget(current)
             yield {**busy(False), confirm_panel: gr.update(visible=False), status: "",
+                   usage_line: describe_usage(turn_usage, usage_totals(history.load(current))),
                    past: past_chats(current) | {"interactive": True}}
 
         async def click_allow(current: str):
@@ -404,22 +428,23 @@ def run_graph(args, llm) -> None:
                 turns[current].cancel()
 
         def open_chat(selected: str):
-            return selected, replay(history.load(selected))
+            records = history.load(selected)
+            return selected, replay(records), describe_usage(None, usage_totals(records))
 
         def start_new_chat():
-            return "", [], past_chats()
+            return "", [], past_chats(), ""
 
         gr.on([message.submit, send.click], respond, [message, chat_id, ask_when],
-              [message, send, stop, new_chat, past, chatbot, chat_id, confirm_panel, change, status],
+              [message, send, stop, new_chat, past, chatbot, chat_id, confirm_panel, change, status, usage_line],
               concurrency_limit=4)
         stop.click(click_stop, [chat_id], None, concurrency_limit=None)
         allow.click(click_allow, [chat_id], [confirm_panel], concurrency_limit=None)
         decline.click(click_decline, [chat_id], [confirm_panel], concurrency_limit=None)
-        past.input(open_chat, [past], [chat_id, chatbot])
-        new_chat.click(start_new_chat, None, [chat_id, chatbot, past])
+        past.input(open_chat, [past], [chat_id, chatbot, usage_line])
+        new_chat.click(start_new_chat, None, [chat_id, chatbot, past, usage_line])
         demo.load(past_chats, None, [past])
 
-    demo.launch(share=False, css="#chat-history { max-height: 60vh; overflow-y: auto; }", prevent_thread_lock=True)
+    demo.launch(share=False, css="#chat-history { max-height: 60vh; overflow-y: auto; } #usage { opacity: 0.7; font-size: 0.9em; }", prevent_thread_lock=True)
     try:
         while True:  # the web server runs in its own thread; this one waits for Ctrl+C
             time.sleep(0.5)

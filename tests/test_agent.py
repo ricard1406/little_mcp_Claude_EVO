@@ -147,3 +147,25 @@ async def test_parallel_tool_results_keep_their_call_ids():
     results = {e.call_id: e for e in events if e.kind == "tool_result"}
     assert results["call_a"].tool == "find_item" and "APPLES" in results["call_a"].text
     assert results["call_b"].tool == "calculate" and results["call_b"].text.strip() == "24"
+
+
+async def test_tokens_are_added_up_over_every_model_call_of_an_answer():
+    def with_usage(message, read, wrote, cached=0):
+        message.usage_metadata = {"input_tokens": read, "output_tokens": wrote, "total_tokens": read + wrote,
+                                  "input_token_details": {"cache_read": cached}}
+        return message
+
+    llm = ScriptedModel(replies=[
+        with_usage(call("calculate", {"expression": "4 * 6"}), 1800, 40),
+        with_usage(AIMessage("24"), 1900, 5, cached=1500),
+    ])
+    async with LittleAgent(llm) as agent:
+        events = [e async for e in agent.stream("4 times 6?")]
+    assert [e.kind for e in events] == ["tool_call", "tool_result", "answer", "usage"]
+    assert events[-1].args == {"input": 3700, "output": 45, "cached": 1500}
+
+
+async def test_no_usage_event_when_the_model_reports_nothing():
+    async with LittleAgent(ScriptedModel(replies=[AIMessage("Hi")], seen=[])) as agent:
+        events = [e async for e in agent.stream("Hello")]
+    assert [e.kind for e in events] == ["answer"]

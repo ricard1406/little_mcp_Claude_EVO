@@ -18,7 +18,7 @@ from pathlib import Path
 from . import config
 
 # Reasoning is not saved: it can be long, and it is only shown with --think.
-SAVED_KINDS = ("user", "tool_call", "tool_result", "answer", "error")
+SAVED_KINDS = ("user", "tool_call", "tool_result", "answer", "error", "usage")
 
 TITLE_LENGTH = 60
 _VALID_ID = re.compile(r"[A-Za-z0-9_-]{1,64}")
@@ -85,3 +85,13 @@ class ChatHistory:
                 title = title[:TITLE_LENGTH] + "…"
             found.append(Chat(path.stem, title or "(empty)", datetime.fromtimestamp(path.stat().st_mtime)))
         return sorted(found, key=lambda chat: chat.updated, reverse=True)
+
+
+def usage_totals(records: list[dict]) -> dict:
+    """The tokens a saved chat has used so far: {"input", "output", "cached"}."""
+    totals = {"input": 0, "output": 0, "cached": 0}
+    for record in records:
+        if record.get("kind") == "usage":
+            for key in totals:
+                totals[key] += (record.get("args") or {}).get(key, 0)
+    return totals

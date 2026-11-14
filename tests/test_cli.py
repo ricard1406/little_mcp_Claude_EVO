@@ -73,3 +73,24 @@ INSERTS = "INSERT INTO BOOKS VALUES ('Cuore', 'Edmondo De Amicis', '1886')\nINSE
 ])
 def test_when_a_change_needs_the_users_ok(ask, tool, args, question):
     assert needs_question(ask, tool, args) is question
+
+
+def test_the_token_line():
+    from little_mcp.cli import describe_usage
+
+    turn = {"input": 2431, "output": 312, "cached": 0}
+    chat = {"input": 10234, "output": 1020, "cached": 1500}
+    assert describe_usage(turn, chat) == (
+        "Tokens · this answer: 2,431 in, 312 out · this chat: 10,234 in, 1,020 out (1,500 of the input from the cache)")
+    assert describe_usage(None, chat).startswith("Tokens · this chat: 10,234 in")
+    assert describe_usage(None, {"input": 0, "output": 0, "cached": 0}) == ""
+
+
+def test_a_saved_usage_record_adds_no_chat_bubble():
+    shown = replay([
+        {"time": "t", "kind": "user", "text": "Hi", "tool": "", "args": None, "is_error": False, "call_id": ""},
+        {"time": "t", "kind": "answer", "text": "Hello", "tool": "", "args": None, "is_error": False, "call_id": ""},
+        {"time": "t", "kind": "usage", "text": "", "tool": "", "args": {"input": 5, "output": 1, "cached": 0},
+         "is_error": False, "call_id": ""},
+    ])
+    assert [m["content"] for m in shown] == ["Hi", "Hello"]
