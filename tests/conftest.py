@@ -5,6 +5,13 @@ from little_mcp.rag import DocumentIndex
 from little_mcp.store import Inventory
 
 
+@pytest.fixture(autouse=True)
+def no_saved_choices(monkeypatch):
+    """The developer's own .env may hold choices saved by the Settings tab: tests must not depend on them."""
+    for name in ("LITTLE_MCP_PROVIDER", "LITTLE_MCP_ASK"):
+        monkeypatch.delenv(name, raising=False)
+
+
 @pytest.fixture(params=["tinysql", "sqlite"])
 def inventory(request, tmp_path):
     return Inventory(backend=request.param, sqlite_path=tmp_path / "store.db", tinysql_dir=tmp_path / "tinysql")

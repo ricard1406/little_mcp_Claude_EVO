@@ -167,16 +167,16 @@ if command -v ollama >/dev/null; then
 fi
 
 title "All set!"
-start="python -m little_mcp"
-if ! (command -v ollama >/dev/null && ollama list 2>/dev/null | grep -q "^$CHAT_MODEL"); then
-    start="python -m little_mcp --provider anthropic"
-fi
+# No --provider here: the model is chosen in the page's ⚙️ Settings tab, and a flag
+# would override that choice at every start.
 cat <<EOF
 Next:
-  1. Add your keys:           nano .env
-  2. Activate the project:    source .venv/bin/activate
-  3. Start chatting:          $start
-  4. Open in your browser:    http://127.0.0.1:7860
+  1. Activate the project:    source .venv/bin/activate
+  2. Start the app:           python -m little_mcp
+  3. Open in your browser:    http://127.0.0.1:7860
+
+The first time, the page opens on ⚙️ Settings: choose the AI model, paste your
+keys and press Save. (You can also edit the .env file by hand: nano .env)
 
 Please read DISCLAIMER.md: it explains the sample data and where your data goes.
 EOF

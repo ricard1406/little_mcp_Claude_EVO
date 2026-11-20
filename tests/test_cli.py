@@ -94,3 +94,22 @@ def test_a_saved_usage_record_adds_no_chat_bubble():
          "is_error": False, "call_id": ""},
     ])
     assert [m["content"] for m in shown] == ["Hi", "Hello"]
+
+
+def anthropic_error(cls, status: int, message: str):
+    import httpx
+
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    return cls(message, response=httpx.Response(status, request=request), body=None)
+
+
+def test_errors_a_user_can_fix_are_explained_in_plain_words():
+    import anthropic
+
+    from little_mcp.cli import explain_error
+
+    assert "Test the key" in explain_error(anthropic_error(anthropic.AuthenticationError, 401, "invalid x-api-key"))
+    assert "Billing" in explain_error(anthropic_error(
+        anthropic.BadRequestError, 400, "Your credit balance is too low to access the Anthropic API."))
+    # Anything else keeps its type and message, so it can still be looked up.
+    assert explain_error(ValueError("odd")) == "ValueError: odd"

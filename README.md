@@ -118,7 +118,16 @@ ollama pull nomic-embed-text
 
 ### 3. Add your keys
 
-Open the settings file in a text editor:
+**The easy way: the ⚙️ Settings tab.** Start the app (step 4). The first time,
+the page opens on **⚙️ Settings** by itself. Choose the AI model, paste your keys,
+press **🔑 Test the key** if you like, then **💾 Save**. You can come back to
+this tab any time, and the next message uses the new settings: no restart.
+
+The page saves everything in the `.env` file of the project. It never shows a
+saved key again, only its last 4 characters (`Saved: ••••7f2a`). To change one,
+paste the new key; to keep it, leave the field empty.
+
+**Or by hand.** Open the settings file in a text editor:
 
 ```bash
 nano .env
@@ -155,14 +164,15 @@ Then open http://127.0.0.1:7860 in your browser.
 
 | Command | What it does |
 |---|---|
-| `python -m little_mcp` | Web UI at http://127.0.0.1:7860, with the local model |
+| `python -m little_mcp` | Web UI at http://127.0.0.1:7860, with the model chosen in ⚙️ Settings (the local model until you choose) |
 | `python -m little_mcp text` | Chat in the terminal instead |
 | `python -m little_mcp --provider anthropic` | Use Claude (default model `claude-opus-5-5`) |
 | `python -m little_mcp --think` | Also show the model's reasoning and every tool call |
 | `python -m little_mcp --model llama3.2` | Use another Ollama (or Claude) model |
 | `python -m little_mcp --provider anthropic --effort high` | Let Claude think harder |
 
-Flags can be combined. `python -m little_mcp --help` lists them all.
+Flags can be combined. `python -m little_mcp --help` lists them all. A flag
+wins over the choice saved in ⚙️ Settings, for that run.
 
 ### Changing your data is always your call
 
@@ -174,7 +184,7 @@ you all of it and asks:
 - in the **terminal**, with `Allow tiny_sql_write? [y/N]`.
 
 If the question gets in your way, choose when to be asked: under **Ask before
-changes** in the web UI, or with `--ask` when you start.
+changing data** in the **⚙️ Settings** tab, or with `--ask` when you start.
 
 | Choice | `--ask` | What runs without a question |
 |---|---|---|

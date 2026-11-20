@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### ⚙️ Settings tab
+- **Set up the app from the page, not from `.env`.** A new tab in the web UI: the AI
+  model (Claude or the local one), the Claude key with a free **Test the key** button,
+  the weather key, and when to ask before changing data. **Save** writes `.env`, and
+  the next message uses the new settings without a restart.
+- **The first start opens on Settings** when the chat can't work yet (no Claude key,
+  or no local model), with a welcome that says what is missing. Before, the app
+  stopped with "Set ANTHROPIC_API_KEY in your .env file".
+- Saved keys never go back to the browser: the page shows only their last 4 characters.
+  `.env` is now readable by its owner only (`chmod 600`), since it holds keys.
+- Errors a user can fix are explained in plain words: a refused Claude key, a key
+  without API access, and Anthropic credit used up.
+- The choices saved in Settings become the defaults of `--provider` and `--ask`.
+  A flag still wins, for that run. `install.sh` now ends by pointing to the page.
+
+### Other changes
 - **An optional password for the HTTP server.** Set `LITTLE_MCP_PASSWORD` in `.env`
   on the server and on the client. The server then refuses any request without it,
   before MCP sees it. Until now, anything that could reach the port could call

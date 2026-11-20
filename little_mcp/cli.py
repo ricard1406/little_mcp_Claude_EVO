@@ -9,12 +9,13 @@
 import argparse
 import asyncio
 import json
+import os
 import sys
 import threading
 import time
 from collections import defaultdict
 
-from . import __version__
+from . import __version__, settings
 from .agent import DEFAULT_CLAUDE_MODEL, DEFAULT_OLLAMA_MODEL, Event, LittleAgent, build_llm
 from .history import ChatHistory, usage_totals
 from .tinysql.database import only_inserts
@@ -41,25 +42,33 @@ ASK_CHOICES = {
 }
 
 
+def _from_env(name: str, choices, default: str) -> str:
+    """A default saved by the ⚙️ Settings tab in .env, if it is a valid choice."""
+    value = os.getenv(name, "").strip().lower()
+    return value if value in choices else default
+
+
 def parse_args(argv=None):
     p = argparse.ArgumentParser(prog="little_mcp", description="Little MCP agent",
                                 formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("mode", nargs="?", choices=["graph", "text"], default="graph",
                    help="graph: web UI (default)\ntext: chat in the terminal")
-    p.add_argument("--provider", choices=["ollama", "anthropic"], default="ollama",
-                   help="ollama: local model (default)\nanthropic: Claude (needs ANTHROPIC_API_KEY in .env)")
+    p.add_argument("--provider", choices=["ollama", "anthropic"],
+                   default=_from_env(settings.PROVIDER, settings.PROVIDERS, "ollama"),
+                   help="ollama: local model\nanthropic: Claude (needs ANTHROPIC_API_KEY in .env)\n"
+                        "(default: the choice saved in the ⚙️ Settings tab, otherwise ollama)")
     p.add_argument("--model", help=f"model name (defaults: {DEFAULT_OLLAMA_MODEL} / {DEFAULT_CLAUDE_MODEL})")
     p.add_argument("--think", action="store_true", help="show the model's reasoning and every tool call")
     p.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max"], default="medium",
                    help="Claude only: how much effort to spend per answer (default: medium)")
     p.add_argument("--server-url", help="connect to an MCP server already running over HTTP,\n"
                                         "e.g. http://127.0.0.1:8000/mcp (default: start one automatically)")
-    p.add_argument("--ask", choices=list(ASK_CHOICES), default="always",
+    p.add_argument("--ask", choices=list(ASK_CHOICES), default=_from_env(settings.ASK, ASK_CHOICES, "always"),
                    help="when to ask before changing data:\n"
                         "always: before every change (default)\n"
                         "except-inserts: not for an INSERT, which only adds rows\n"
                         "never: change the data without asking\n"
-                        "(the web UI starts with this choice, and you can change it there)")
+                        "(default: the choice saved in the ⚙️ Settings tab, otherwise always)")
     p.add_argument("--allow-writes", action="store_true", help="the same as --ask never")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     args = p.parse_args(argv)
@@ -71,6 +80,21 @@ def parse_args(argv=None):
 def _short(value, limit=300) -> str:
     text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
     return text if len(text) <= limit else text[:limit] + "..."
+
+
+def explain_error(error: Exception) -> str:
+    """What the chat shows for a failed answer: plain words for the problems a user can fix."""
+    try:
+        import anthropic
+    except ImportError:  # Claude support not installed: nothing of Anthropic's can fail
+        return f"{type(error).__name__}: {error}"
+    if isinstance(error, anthropic.AuthenticationError):
+        return "Claude refused the API key. Open ⚙️ Settings, paste the key again and press 🔑 Test the key."
+    if isinstance(error, anthropic.PermissionDeniedError):
+        return "This Claude API key is not allowed to use the API. Check it on console.anthropic.com → API Keys."
+    if isinstance(error, anthropic.BadRequestError) and "credit balance" in str(error).lower():
+        return "Your Anthropic credit is used up. Add some on console.anthropic.com → Billing, then ask again."
+    return f"{type(error).__name__}: {error}"
 
 
 def describe_usage(turn: dict | None, chat: dict) -> str:
@@ -172,8 +196,8 @@ async def run_text(args, llm) -> None:
                         print(f"  {describe_usage(event.args, chat_usage)}")
                     _print_event(event, args.think)
             except Exception as e:
-                history.save(chat_id, Event("error", f"{type(e).__name__}: {e}"))
-                print(f"\n❌ {type(e).__name__}: {e}\n")
+                history.save(chat_id, Event("error", explain_error(e)))
+                print(f"\n❌ {explain_error(e)}\n")
         print("Goodbye!")
 
 
@@ -237,8 +261,30 @@ def replay(records: list[dict]) -> list[dict]:
     return shown
 
 
+NO_MODEL = "No AI model is set up yet. Open the ⚙️ Settings tab, choose one and press Save."
+
+
+def welcome_text(problem: str) -> str:
+    return ("### 👋 Welcome!\nBefore the first chat, choose the AI model that will answer you.\n\n"
+            f"⚠️ {problem}")
+
+
 def run_graph(args, llm) -> None:
     import gradio as gr
+
+    # What the ⚙️ Settings tab can change while the app runs. A turn reads it when it starts.
+    live = {"llm": llm, "provider": args.provider, "ask": args.ask}
+
+    def model_for(provider: str) -> str | None:
+        """--model was chosen for the provider given on the command line, not for the other one."""
+        return args.model if provider == args.provider else None
+
+    def problem_now() -> str:
+        provider = live["provider"]
+        problem = settings.setup_problem(provider, model_for("ollama") or DEFAULT_OLLAMA_MODEL)
+        if not problem and live["llm"] is None:
+            problem = NO_MODEL
+        return problem
 
     history = ChatHistory()
     host: dict = {}  # the task that owns the MCP session: "task", "ready", "stop", "loop"
@@ -251,7 +297,7 @@ def run_graph(args, llm) -> None:
 
     async def ask_in_browser(tool: str, args_: dict, chat_id: str) -> bool:
         """Show the Allow / Decline panel, and wait for a click. The agent is paused meanwhile."""
-        if not needs_question(asking.get(chat_id, args.ask), tool, args_):
+        if not needs_question(asking.get(chat_id, live["ask"]), tool, args_):
             return True
         async with one_question[chat_id]:
             answers[chat_id] = asyncio.get_running_loop().create_future()
@@ -270,8 +316,8 @@ def run_graph(args, llm) -> None:
 
     async def keep_agent(ready: asyncio.Future, stop: asyncio.Event) -> None:
         try:
-            async with LittleAgent(llm, args.server_url, ask_in_browser,
-                                   trim_history=args.provider == "ollama") as agent:
+            async with LittleAgent(live["llm"], args.server_url, ask_in_browser,
+                                   trim_history=live["provider"] == "ollama") as agent:
                 ready.set_result(agent)
                 await stop.wait()
         except Exception as error:  # e.g. the server did not start: the next message tries again
@@ -303,34 +349,66 @@ def run_graph(args, llm) -> None:
 
         gr.Markdown("## Little MCP EVO\nWeather, time, arithmetic, your documents, the warehouse and your own tables.")
 
-        # A row, not a sidebar: on a narrow window a row wraps, while a sidebar would cover the chat.
-        with gr.Row():
-            with gr.Column(scale=1, min_width=220):
-                new_chat = gr.Button("➕ New chat", variant="primary")
-                past = gr.Radio(label="Chat history", choices=[], interactive=True, elem_id="chat-history")
-                ask_when = gr.Radio(label="Ask before changes", value=args.ask, interactive=True,
-                                    choices=[(label, value) for value, label in ASK_CHOICES.items()],
-                                    info="\"Not for new rows\" lets an INSERT run without the question.")
-
-            with gr.Column(scale=4, min_width=420):
-                chatbot = gr.Chatbot(height="55vh", label="Conversation", show_label=False)
-
-                with gr.Group(visible=False) as confirm_panel:
-                    change = gr.Textbox(label="", interactive=False, lines=2, max_lines=25)
-                    with gr.Row():
-                        allow = gr.Button("✅ Allow", variant="primary")
-                        decline = gr.Button("🚫 Decline", variant="stop")
-
-                status = gr.Markdown("")
-                usage_line = gr.Markdown("", elem_id="usage")
-
+        with gr.Tabs(selected="chat") as tabs:
+            with gr.Tab("💬 Chat", id="chat"):
+                # A row, not a sidebar: on a narrow window a row wraps, while a sidebar would cover the chat.
                 with gr.Row():
-                    message = gr.Textbox(placeholder="Write a message...", show_label=False, scale=8, lines=2,
-                                         max_lines=12, submit_btn=False)
-                    with gr.Column(scale=1, min_width=100):
-                        send = gr.Button("Send", variant="primary")
-                        stop = gr.Button("⏹ Stop", variant="stop", interactive=False)
-                gr.Examples(examples=[[e] for e in EXAMPLES], inputs=[message], label="Try")
+                    with gr.Column(scale=1, min_width=220):
+                        new_chat = gr.Button("➕ New chat", variant="primary")
+                        past = gr.Radio(label="Chat history", choices=[], interactive=True, elem_id="chat-history")
+
+                    with gr.Column(scale=4, min_width=420):
+                        chatbot = gr.Chatbot(height="55vh", label="Conversation", show_label=False)
+
+                        with gr.Group(visible=False) as confirm_panel:
+                            change = gr.Textbox(label="", interactive=False, lines=2, max_lines=25)
+                            with gr.Row():
+                                allow = gr.Button("✅ Allow", variant="primary")
+                                decline = gr.Button("🚫 Decline", variant="stop")
+
+                        status = gr.Markdown("")
+                        usage_line = gr.Markdown("", elem_id="usage")
+
+                        with gr.Row():
+                            message = gr.Textbox(placeholder="Write a message...", show_label=False, scale=8,
+                                                 lines=2, max_lines=12, submit_btn=False)
+                            with gr.Column(scale=1, min_width=100):
+                                send = gr.Button("Send", variant="primary")
+                                stop = gr.Button("⏹ Stop", variant="stop", interactive=False)
+                        gr.Examples(examples=[[e] for e in EXAMPLES], inputs=[message], label="Try")
+
+            with gr.Tab("⚙️ Settings", id="settings"):
+                # The keys are never sent to the browser: the fields start empty, the placeholder
+                # shows the last 4 characters, and an empty field on Save keeps the saved key.
+                with gr.Column(elem_id="settings"):
+                    welcome = gr.Markdown("", visible=False)
+
+                    gr.Markdown("### AI model")
+                    provider = gr.Radio(choices=[(label, value) for value, label in settings.PROVIDERS.items()],
+                                        value=args.provider, show_label=False)
+                    claude_key = gr.Textbox(label="Claude API key", type="password",
+                                            info="From console.anthropic.com → API Keys. "
+                                                 "Leave it empty to keep the saved key.")
+                    with gr.Row():
+                        test_key = gr.Button("🔑 Test the key", size="sm", scale=0)
+                        key_result = gr.Markdown("")
+
+                    gr.Markdown("### Ask before changing data")
+                    ask_when = gr.Radio(value=args.ask, show_label=False,
+                                        choices=[(label, value) for value, label in ASK_CHOICES.items()],
+                                        info="\"Not for new rows\" lets an INSERT run without the question. "
+                                             "\"Never\" lets the AI change and delete your data without asking.")
+
+                    gr.Markdown("### Weather (optional)")
+                    weather_key = gr.Textbox(label="OpenWeather API key", type="password",
+                                             info="Free at openweathermap.org/api. A new key can take 2 hours "
+                                                  "to work. Leave it empty to keep the saved key.")
+
+                    save = gr.Button("💾 Save", variant="primary")
+                    save_result = gr.Markdown("")
+                    gr.Markdown("Settings are saved in the `.env` file of the project. "
+                                "An option on the command line, such as `--provider`, wins over them.",
+                                elem_id="usage")
 
         def busy(is_busy: bool) -> dict:
             """While a turn runs, nothing may start a second one or switch to another chat."""
@@ -338,13 +416,13 @@ def run_graph(args, llm) -> None:
             return {message: enabled, send: enabled, new_chat: enabled, past: enabled,
                     stop: gr.update(interactive=is_busy)}
 
-        async def respond(text: str, current: str, ask_choice: str):
+        async def respond(text: str, current: str):
             text = text.strip()
             if not text:
                 yield {message: gr.update()}
                 return
             current = current or history.new_id()
-            asking[current] = ask_choice
+            asking[current] = live["ask"]
             earlier = history.load(current)
             shown = replay(earlier)
             boxes: dict[str, int] = {}
@@ -362,6 +440,10 @@ def run_graph(args, llm) -> None:
                 # A task of its own, so the page can be updated while the agent works or waits for a click.
                 nonlocal finished_cleanly
                 try:
+                    if live["llm"] is None:
+                        queue.put_nowait(Event("error", NO_MODEL))
+                        finished_cleanly = True
+                        return
                     agent = await get_agent()
                     async for event in agent.stream(text, current, earlier):
                         queue.put_nowait(event)
@@ -369,7 +451,7 @@ def run_graph(args, llm) -> None:
                 except asyncio.CancelledError:
                     queue.put_nowait(Event("error", "Stopped."))
                 except Exception as e:
-                    queue.put_nowait(Event("error", f"{type(e).__name__}: {e}"))
+                    queue.put_nowait(Event("error", explain_error(e)))
                 finally:
                     queue.put_nowait(None)
 
@@ -434,7 +516,61 @@ def run_graph(args, llm) -> None:
         def start_new_chat():
             return "", [], past_chats(), ""
 
-        gr.on([message.submit, send.click], respond, [message, chat_id, ask_when],
+        # --- ⚙️ Settings ---------------------------------------------------------
+
+        def key_fields() -> dict:
+            """Empty key fields, with the saved keys shown masked as placeholders."""
+            def field(name: str, example: str):
+                saved = settings.mask(settings.get(name))
+                return gr.update(value="", placeholder=f"Saved: {saved}" if saved else example)
+            return {claude_key: field(settings.CLAUDE_KEY, "Paste your key: sk-ant-..."),
+                    weather_key: field(settings.WEATHER_KEY, "Paste your key")}
+
+        def on_page_load():
+            """Fill the settings, and open them first if the chat cannot work yet."""
+            problem = problem_now()
+            return {past: past_chats(), provider: live["provider"], ask_when: live["ask"], **key_fields(),
+                    welcome: gr.update(value=welcome_text(problem) if problem else "", visible=bool(problem)),
+                    tabs: gr.Tabs(selected="settings" if problem else "chat")}
+
+        async def test_the_key(typed: str):
+            key = typed.strip() or settings.get(settings.CLAUDE_KEY)
+            yield "⏳ Asking Anthropic..."
+            _, verdict = await asyncio.to_thread(settings.check_claude_key, key)
+            yield verdict if typed.strip() or not key else f"{verdict} (I tested the saved key.)"
+
+        async def save_settings(chosen: str, typed_claude: str, typed_weather: str, ask_choice: str):
+            if turns:
+                return {save_result: "⏳ An answer is still being written. Wait for it, or press ⏹ Stop, "
+                                     "then Save again."}
+            values = {settings.PROVIDER: chosen, settings.ASK: ask_choice}
+            if typed_claude.strip():
+                values[settings.CLAUDE_KEY] = typed_claude
+            if typed_weather.strip():
+                values[settings.WEATHER_KEY] = typed_weather
+            try:
+                settings.save(values)
+            except (ValueError, OSError) as error:
+                return {save_result: f"❌ Could not save: {error}"}
+
+            live["ask"] = ask_choice
+            # A new model, or a new key, means a new connection: the MCP server is a child process
+            # that read the keys when it started. The chats stay; the next message reconnects.
+            if chosen != live["provider"] or len(values) > 2 or live["llm"] is None:
+                try:
+                    new_llm = build_llm(chosen, model_for(chosen), args.think, args.effort)
+                except RuntimeError:
+                    new_llm = None
+                await close_agent()
+                live.update(llm=new_llm, provider=chosen)
+
+            problem = problem_now()
+            verdict = f"⚠️ Saved, but the chat can't work yet: {problem}" if problem else \
+                f"✅ Saved. The next message uses {settings.PROVIDERS[chosen].split(' (')[0]}."
+            return {save_result: verdict, **key_fields(),
+                    welcome: gr.update(value=welcome_text(problem) if problem else "", visible=bool(problem))}
+
+        gr.on([message.submit, send.click], respond, [message, chat_id],
               [message, send, stop, new_chat, past, chatbot, chat_id, confirm_panel, change, status, usage_line],
               concurrency_limit=4)
         stop.click(click_stop, [chat_id], None, concurrency_limit=None)
@@ -442,9 +578,16 @@ def run_graph(args, llm) -> None:
         decline.click(click_decline, [chat_id], [confirm_panel], concurrency_limit=None)
         past.input(open_chat, [past], [chat_id, chatbot, usage_line])
         new_chat.click(start_new_chat, None, [chat_id, chatbot, past, usage_line])
-        demo.load(past_chats, None, [past])
+        test_key.click(test_the_key, [claude_key], [key_result])
+        save.click(save_settings, [provider, claude_key, weather_key, ask_when],
+                   [save_result, claude_key, weather_key, welcome])
+        demo.load(on_page_load, None, [past, provider, ask_when, claude_key, weather_key, welcome, tabs])
 
-    demo.launch(share=False, css="#chat-history { max-height: 60vh; overflow-y: auto; } #usage { opacity: 0.7; font-size: 0.9em; }", prevent_thread_lock=True)
+    # server_name stays 127.0.0.1 (Gradio's default) on purpose: the Settings tab shows and
+    # changes your keys, so this page must never be reachable from another computer.
+    demo.launch(share=False, server_name="127.0.0.1", prevent_thread_lock=True,
+                css="#chat-history { max-height: 60vh; overflow-y: auto; } #usage { opacity: 0.7; font-size: 0.9em; }"
+                    " #settings { max-width: 760px; }")
     try:
         while True:  # the web server runs in its own thread; this one waits for Ctrl+C
             time.sleep(0.5)
@@ -465,7 +608,11 @@ def main(argv=None) -> None:
     try:
         llm = build_llm(args.provider, args.model, args.think, args.effort)
     except RuntimeError as e:
-        sys.exit(f"❌ {e}")
+        if args.mode != "graph":
+            sys.exit(f"❌ {e}")
+        # The web page can fix this itself: it opens on the ⚙️ Settings tab.
+        print(f"⚠️  {e} The page will open on ⚙️ Settings, where you can set it up.")
+        llm = None
     if args.mode == "graph":
         run_graph(args, llm)
         return
