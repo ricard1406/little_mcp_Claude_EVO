@@ -77,7 +77,7 @@ before each step**, so nothing is downloaded without your OK:
 | `.env` settings file | none | yes |
 | [Ollama](https://ollama.com), to run AI models locally | often more than 1 GB | only without Claude, or for document search |
 | `nomic-embed-text` model | about 270 MB | for document search |
-| `qwen3:4b` chat model | about 2.5 GB | only to chat without Claude |
+| `qwen3:4b` chat model | about 2.5 GB | only to chat without Claude, and very slow without an NVIDIA or AMD graphics card (the script tells you if it finds none) |
 
 **With a Claude API key you can skip Ollama.** Everything works except
 searching your documents. Steps that are already done are skipped, so you can

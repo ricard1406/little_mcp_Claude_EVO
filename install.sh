@@ -46,6 +46,24 @@ ollama_ready() {
     return 1
 }
 
+# gpu_found -> "yes", "no" or "unknown". Ollama runs chat models fast only on an NVIDIA
+# or AMD graphics card; its own installer looks for the same names. A virtual machine
+# usually shows a virtual card (VMware SVGA, VirtualBox...), which counts as no.
+gpu_found() {
+    if command -v nvidia-smi >/dev/null && nvidia-smi -L >/dev/null 2>&1; then
+        echo yes
+        return
+    fi
+    if ! command -v lspci >/dev/null; then
+        echo unknown
+        return
+    fi
+    local cards
+    cards=$(lspci 2>/dev/null | grep -iE 'vga|3d|display' || true)
+    # Not just "ati": it is also inside "VGA compatible controller". AMD cards show "[AMD/ATI]".
+    if [[ ${cards,,} =~ nvidia|amd/ati|radeon ]]; then echo yes; else echo no; fi
+}
+
 pull_model() {  # pull_model name "description" default
     if ollama list 2>/dev/null | grep -q "^$1"; then
         echo "$1 is already downloaded."
@@ -134,6 +152,12 @@ if command -v ollama >/dev/null; then
     echo "Waiting for the Ollama service..."
     if ollama_ready; then
         pull_model "$EMBED_MODEL" "about 270 MB, for document search" y
+        if [[ $(gpu_found) == no ]] && ! ollama list 2>/dev/null | grep -q "^$CHAT_MODEL"; then
+            echo
+            echo "Note: no NVIDIA or AMD graphics card was found, so $CHAT_MODEL would run on the CPU."
+            echo "There it is very slow: one answer can take minutes, and storing a dozen rows can"
+            echo "take over half an hour. With a Claude API key you don't need it."
+        fi
         pull_model "$CHAT_MODEL" "about 2.5 GB, for chatting without Claude" n
     else
         echo "Ollama is installed but not running. Start it with:"
