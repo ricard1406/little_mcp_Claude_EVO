@@ -183,6 +183,18 @@ _SERVER_ENV_PREFIXES = ("LITTLE_MCP_", "OPENWEATHER_", "DB_", "SQLITE_", "TINYSQ
                         "no_proxy")
 
 
+def _password_refused(error: BaseException) -> bool:
+    """True if the HTTP server answered 401, the PasswordCheck in server.py.
+
+    The MCP client runs its connection in a task group, so the 401 arrives
+    wrapped: an ExceptionGroup with an httpx.HTTPStatusError inside.
+    """
+    response = getattr(error, "response", None)
+    if getattr(response, "status_code", None) == 401:
+        return True
+    return any(_password_refused(e) for e in getattr(error, "exceptions", ()))
+
+
 def _server_env() -> dict[str, str]:
     from mcp.client.stdio import get_default_environment
 
@@ -266,7 +278,10 @@ class LittleAgent:
 
     def _connection(self) -> dict:
         if self.server_url:
-            return {"transport": "streamable_http", "url": self.server_url}
+            connection = {"transport": "streamable_http", "url": self.server_url}
+            if config.MCP_PASSWORD:  # the server checks it: see PasswordCheck in server.py
+                connection["headers"] = {"Authorization": f"Bearer {config.MCP_PASSWORD}"}
+            return connection
         # Start our own server as a child process and talk to it over stdin/stdout.
         return {
             "transport": "stdio",
@@ -278,7 +293,15 @@ class LittleAgent:
 
     async def __aenter__(self):
         client = MultiServerMCPClient({"little": self._connection()})
-        session = await self._stack.enter_async_context(client.session("little"))
+        try:
+            session = await self._stack.enter_async_context(client.session("little"))
+        except BaseException as error:
+            if _password_refused(error):
+                raise PermissionError(
+                    f"The MCP server at {self.server_url} refused the password. Set LITTLE_MCP_PASSWORD "
+                    "in this computer's .env to the same value as on the server, then start again."
+                ) from None
+            raise
 
         write_tools: set[str] = set()
         interceptors = [_confirm_writes(write_tools, self.confirm, self.declined_message)] if self.confirm else []

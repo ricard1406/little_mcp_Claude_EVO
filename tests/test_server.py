@@ -204,3 +204,41 @@ def test_the_shutdown_message_is_hidden_only_while_stopping(caplog):
         uvicorn_log.removeFilter(quiet)
     assert [r.getMessage() for r in caplog.records] == [
         "ASGI callable returned without completing response.", "Something else went wrong."]
+
+
+# --- The password of the HTTP server -------------------------------------------
+
+
+async def hello_app(scope, receive, send):
+    """A stand-in for the MCP web app: it answers 200 to whoever gets through."""
+    await send({"type": "http.response.start", "status": 200, "headers": []})
+    await send({"type": "http.response.body", "body": b"hello"})
+
+
+async def post(app, headers=None):
+    import httpx
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        return await client.post("/mcp", headers=headers or {})
+
+
+async def test_password_lets_the_right_one_in():
+    response = await post(server.PasswordCheck(hello_app, "s3cret"), {"Authorization": "Bearer s3cret"})
+    assert response.status_code == 200 and response.text == "hello"
+
+
+@pytest.mark.parametrize("headers", [
+    {},                                    # no password at all
+    {"Authorization": "Bearer wrong"},     # a wrong one
+    {"Authorization": "Bearer s3cre"},     # almost right is still wrong
+    {"Authorization": "s3cret"},           # right password, without "Bearer "
+])
+async def test_password_refuses_everything_else(headers):
+    response = await post(server.PasswordCheck(hello_app, "s3cret"), headers)
+    assert response.status_code == 401 and "LITTLE_MCP_PASSWORD" in response.text
+    assert "www-authenticate" not in response.headers
+
+
+async def test_password_guards_the_real_mcp_app():
+    response = await post(server.PasswordCheck(server.mcp.streamable_http_app(), "s3cret"))
+    assert response.status_code == 401

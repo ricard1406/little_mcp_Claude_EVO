@@ -285,14 +285,31 @@ itself. It works the same way across two virtual machines.
    hostname -I
    ```
 
-2. Start the server so it listens on the network, not only on `127.0.0.1`.
+2. **Optional: a password.** Without one, anything that can reach the port can use
+   every tool (see [Security](#security)). To turn it on, add a line to the server's
+   `.env`. Any text works. This command makes a random one:
+
+   ```bash
+   python3 -c "import secrets; print(secrets.token_urlsafe(16))"
+   ```
+
+   ```
+   LITTLE_MCP_PASSWORD=the-password-you-chose
+   ```
+
+   You type it once, in `.env` on each machine, not every time you chat.
+   To turn it off again, leave it empty.
+
+3. Start the server so it listens on the network, not only on `127.0.0.1`.
    Leave this terminal open:
 
    ```bash
    cd ~/little_mcp_Claude_EVO && source .venv/bin/activate && MCP_HOST=0.0.0.0 python -m little_mcp.server --transport http
    ```
 
-3. Check the firewall:
+   It prints `Password: on` or, without one, a warning that anyone can use the tools.
+
+4. Check the firewall:
 
    ```bash
    sudo ufw status
@@ -314,15 +331,25 @@ Put the server's IP address in place of `SERVER_IP`.
 ```bash
 claude mcp add --transport http little-mcp http://SERVER_IP:8000/mcp
 ```
+
+With a password, add it as a header (put your password in place of `PASSWORD`):
+
+```bash
+claude mcp add --transport http little-mcp http://SERVER_IP:8000/mcp --header "Authorization: Bearer PASSWORD"
+```
+
+If `little-mcp` is already there, remove it first with `claude mcp remove little-mcp`. Then check:
+
 ```bash
 claude mcp get little-mcp
 ```
 
-The second command should show `Status: ✔ Connected`. Then **start a new
+It should show `Status: ✔ Connected`. Then **start a new
 Claude Code session**, because MCP servers are loaded when a session starts.
 Claude Code asks your permission the first time it uses each tool.
 
-**Little MCP's own chat** (it needs the project installed on the client too):
+**Little MCP's own chat** (it needs the project installed on the client too).
+With a password, put the same `LITTLE_MCP_PASSWORD=` line in the client's `.env`:
 
 ```bash
 python -m little_mcp --provider anthropic --server-url http://SERVER_IP:8000/mcp
@@ -332,16 +359,26 @@ python -m little_mcp --provider anthropic --server-url http://SERVER_IP:8000/mcp
 
 | What you see | Likely cause |
 |---|---|
-| `connection timed out` | The server machine's firewall: see step 3. |
+| `connection timed out` | The server machine's firewall: see step 4. |
 | `connection refused` | The server isn't running, or it was started without `MCP_HOST=0.0.0.0`. |
+| `refused the password`, or `401 Unauthorized` | The client's password is missing or differs from the server's `LITTLE_MCP_PASSWORD`. |
 | `ping SERVER_IP` fails too | The machines aren't on the same network. |
 
 ### Security
 
-⚠️ **The server has no password.** Anything that can reach port 8000 can use
-every tool, including the ones that change the stock. Use this only on a network
-you trust, such as your home network or VMs on your own PC, and keep the firewall
-rule limited to the client's IP address. Remove the rule when you're done:
+**The password is optional.** Without it, anything that can reach port 8000
+can use every tool, including the ones that change the stock and your tables.
+Note that "Allow tiny_sql_write?" is asked by the *client*. A program that talks
+to the server directly is never asked, so the password is what stops it.
+
+What the password does and doesn't do:
+- ✅ It keeps out other devices on your network: a phone, a smart TV, a guest's laptop.
+- ❌ It travels as plain text over `http://`. Someone who can read your network
+  traffic could see it. Protecting against that needs encryption: see SSH below.
+
+Either way, use the HTTP server only on a network you trust, such as your home
+network or VMs on your own PC, and keep the firewall rule limited to the
+client's IP address. Remove the rule when you're done:
 
 ```bash
 sudo ufw delete allow from CLIENT_IP to any port 8000 proto tcp

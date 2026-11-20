@@ -182,3 +182,28 @@ def test_prompt_caching_only_for_claude():
     assert isinstance(caching, AnthropicPromptCachingMiddleware) and caching.ttl == "5m"
     assert _prompt_caching(ChatOllama(model="qwen3:4b")) is None
     assert _prompt_caching(ScriptedModel(replies=[])) is None
+
+
+def test_http_connection_sends_the_password(monkeypatch):
+    from little_mcp import agent, config
+
+    monkeypatch.setattr(config, "MCP_PASSWORD", "s3cret")
+    connection = agent.LittleAgent(llm=None, server_url="http://server:8000/mcp")._connection()
+    assert connection["headers"] == {"Authorization": "Bearer s3cret"}
+
+    monkeypatch.setattr(config, "MCP_PASSWORD", "")
+    connection = agent.LittleAgent(llm=None, server_url="http://server:8000/mcp")._connection()
+    assert "headers" not in connection
+
+
+def test_a_refused_password_is_recognised_inside_the_error_group():
+    import httpx
+
+    from little_mcp import agent
+
+    request = httpx.Request("POST", "http://server:8000/mcp")
+    refused = httpx.HTTPStatusError("401", request=request, response=httpx.Response(401, request=request))
+    assert agent._password_refused(ExceptionGroup("task group", [refused]))
+    other = httpx.HTTPStatusError("500", request=request, response=httpx.Response(500, request=request))
+    assert not agent._password_refused(ExceptionGroup("task group", [other]))
+    assert not agent._password_refused(ConnectionRefusedError())

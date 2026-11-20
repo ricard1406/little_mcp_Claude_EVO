@@ -42,3 +42,7 @@ MARIADB = {
 
 MCP_HOST = os.getenv("MCP_HOST", "127.0.0.1")
 MCP_PORT = int(os.getenv("MCP_PORT", "8000"))
+
+# Only for the HTTP server (--transport http). Empty: no password, anyone who can reach
+# the port can use every tool. Set the same value on the server and on the client.
+MCP_PASSWORD = os.getenv("LITTLE_MCP_PASSWORD", "").strip()

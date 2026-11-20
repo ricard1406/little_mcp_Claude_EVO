@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **An optional password for the HTTP server.** Set `LITTLE_MCP_PASSWORD` in `.env`
+  on the server and on the client. The server then refuses any request without it,
+  before MCP sees it. Until now, anything that could reach the port could call
+  every tool, including the ones that change data, without being asked. Empty
+  means no password, as before; the server then warns when it listens on the network.
+- A wrong password now says so in plain words, instead of an `ExceptionGroup`.
+
 ## 0.7.0: myTinySQL, 2026-11-14
 
 Little MCP gets its own database: a Python port of

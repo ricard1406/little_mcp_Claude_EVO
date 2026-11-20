@@ -11,6 +11,7 @@ Run it:
 """
 
 import argparse
+import hmac
 import logging
 import sys
 from datetime import datetime
@@ -330,8 +331,47 @@ class _QuietShutdown(logging.Filter):
                     and record.getMessage() == "ASGI callable returned without completing response.")
 
 
+class PasswordCheck:
+    """Lets an HTTP request in only if it carries the header  Authorization: Bearer <password>.
+
+    It wraps the whole web app, so it runs before MCP sees anything: a request
+    without the right password never reaches a tool. This matters because asking
+    "Allow tiny_sql_write?" happens in the client. Without a password, a program
+    that calls the server directly is never asked anything.
+
+    The password travels as plain text over http://, so it keeps out other
+    devices on your home network, not someone who can read its traffic (that
+    needs https).
+    """
+
+    def __init__(self, app, password: str):
+        self.app = app
+        self.expected = f"Bearer {password}".encode()
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            given = dict(scope["headers"]).get(b"authorization", b"")
+            # compare_digest takes the same time however many characters match,
+            # so the timing of the answers cannot reveal the password letter by letter.
+            if not hmac.compare_digest(given, self.expected):
+                log.warning("Refused a request with a wrong or missing password, from %s",
+                            (scope.get("client") or ("unknown",))[0])
+                # No "WWW-Authenticate" header: an MCP client that sees one may try an
+                # OAuth sign-in, which this server does not offer.
+                await send({"type": "http.response.start", "status": 401,
+                            "headers": [(b"content-type", b"text/plain; charset=utf-8")]})
+                await send({"type": "http.response.body",
+                            "body": b"Wrong or missing password: set LITTLE_MCP_PASSWORD in the client's .env.\n"})
+                return
+        await self.app(scope, receive, send)
+
+
+def _only_this_computer(host: str) -> bool:
+    return host in ("127.0.0.1", "localhost", "::1")
+
+
 def serve_http() -> None:
-    """What mcp.run(transport="streamable-http") does, with a clean Ctrl+C.
+    """What mcp.run(transport="streamable-http") does, with a clean Ctrl+C and an optional password.
 
     uvicorn handles Ctrl+C itself: it stops gracefully, then raises Ctrl+C
     again so the program ends. Nothing caught it, so Python printed a traceback.
@@ -339,10 +379,18 @@ def serve_http() -> None:
     """
     import uvicorn
 
-    server = uvicorn.Server(uvicorn.Config(mcp.streamable_http_app(), host=config.MCP_HOST, port=config.MCP_PORT,
+    app = mcp.streamable_http_app()
+    if config.MCP_PASSWORD:
+        app = PasswordCheck(app, config.MCP_PASSWORD)
+    server = uvicorn.Server(uvicorn.Config(app, host=config.MCP_HOST, port=config.MCP_PORT,
                                           log_level=mcp.settings.log_level.lower()))
     logging.getLogger("uvicorn.error").addFilter(_QuietShutdown(server))
     log.info("Little MCP server on http://%s:%s/mcp (Ctrl+C to stop)", config.MCP_HOST, config.MCP_PORT)
+    if config.MCP_PASSWORD:
+        log.info("Password: on. Clients need the same LITTLE_MCP_PASSWORD.")
+    elif not _only_this_computer(config.MCP_HOST):
+        log.warning("Password: off. Anyone who can reach this port can use every tool, including "
+                    "the ones that change data. To add one, set LITTLE_MCP_PASSWORD in .env.")
     try:
         anyio.run(server.serve)
     except KeyboardInterrupt:
