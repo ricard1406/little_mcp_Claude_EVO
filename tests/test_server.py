@@ -29,7 +29,7 @@ def data(result):
 async def test_tools_are_discoverable():
     async with connect() as session:
         tools = {t.name: t for t in (await session.list_tools()).tools}
-        assert set(tools) == {"get_datetime", "get_weather", "calculate", "search_documents",
+        assert set(tools) == {"get_datetime", "get_weather", "get_public_ip", "calculate", "search_documents",
                               "list_inventory", "find_item", "adjust_stock", "set_stock",
                               "tiny_sql_read", "tiny_sql_write"}
         writes = {name for name, t in tools.items() if not t.annotations.readOnlyHint}
@@ -76,6 +76,43 @@ async def test_weather_without_key_explains_setup(monkeypatch):
         monkeypatch.setattr(server.config, "OPENWEATHER_API_KEY", "")
         result = await session.call_tool("get_weather", {"city": "Paris"})
         assert result.isError and "OPENWEATHER_API_KEY" in result.content[0].text
+
+
+class FakeResponse:
+    """Stands in for the reply of api.ipify.org, so the tests never go online."""
+
+    def __init__(self, body):
+        self.body = body
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self.body
+
+
+async def test_public_ip(monkeypatch):
+    monkeypatch.setattr(server.requests, "get", lambda *args, **kwargs: FakeResponse({"ip": "203.0.113.7"}))
+    async with connect() as session:
+        result = await session.call_tool("get_public_ip", {})
+        assert not result.isError and data(result) == {"public_ip": "203.0.113.7", "version": "IPv4"}
+
+
+async def test_public_ip_refuses_a_reply_that_is_not_an_address(monkeypatch):
+    monkeypatch.setattr(server.requests, "get", lambda *args, **kwargs: FakeResponse({"ip": "<html>oops</html>"}))
+    async with connect() as session:
+        result = await session.call_tool("get_public_ip", {})
+        assert result.isError and "Could not get the public IP address" in result.content[0].text
+
+
+async def test_public_ip_offline(monkeypatch):
+    def offline(*args, **kwargs):
+        raise server.requests.ConnectionError("no network")
+
+    monkeypatch.setattr(server.requests, "get", offline)
+    async with connect() as session:
+        result = await session.call_tool("get_public_ip", {})
+        assert result.isError and "ConnectionError" in result.content[0].text
 
 
 async def test_local_datetime_needs_no_network():
