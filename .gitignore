@@ -8,3 +8,13 @@ data/mystore.db
 data/tinysql/
 data/chats/
 .gradio/
+*.py[cod]
+venv/
+.env.*
+!.env.example
+*.key
+*.pem
+chroma_db/
+.ipynb_checkpoints/
+.claude/settings.local.json
+.DS_Store
