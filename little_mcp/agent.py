@@ -12,6 +12,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 
+import httpx
 from langchain.agents import create_agent
 from langchain.agents.middleware import AgentMiddleware, ModelCallLimitMiddleware
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -183,16 +184,24 @@ _SERVER_ENV_PREFIXES = ("LITTLE_MCP_", "OPENWEATHER_", "DB_", "SQLITE_", "TINYSQ
                         "no_proxy")
 
 
-def _password_refused(error: BaseException) -> bool:
-    """True if the HTTP server answered 401, the PasswordCheck in server.py.
+def _inside(error: BaseException, test: Callable[[BaseException], bool]) -> bool:
+    """True if the error, or one wrapped inside it, passes the test.
 
-    The MCP client runs its connection in a task group, so the 401 arrives
-    wrapped: an ExceptionGroup with an httpx.HTTPStatusError inside.
+    The MCP client runs its connection in a task group, so a connection problem
+    arrives wrapped: an ExceptionGroup ("unhandled errors in a TaskGroup") with
+    the real error inside, which says nothing useful to the user on its own.
     """
-    response = getattr(error, "response", None)
-    if getattr(response, "status_code", None) == 401:
-        return True
-    return any(_password_refused(e) for e in getattr(error, "exceptions", ()))
+    return test(error) or any(_inside(e, test) for e in getattr(error, "exceptions", ()))
+
+
+def _password_refused(error: BaseException) -> bool:
+    """True if the HTTP server answered 401: the PasswordCheck in server.py."""
+    return _inside(error, lambda e: getattr(getattr(e, "response", None), "status_code", None) == 401)
+
+
+def _server_unreachable(error: BaseException) -> bool:
+    """True if nothing answered at the server's address: refused (no server there) or timed out (a firewall)."""
+    return _inside(error, lambda e: isinstance(e, (httpx.ConnectError, httpx.ConnectTimeout)))
 
 
 def _server_env() -> dict[str, str]:
@@ -300,6 +309,12 @@ class LittleAgent:
                 raise PermissionError(
                     f"The MCP server at {self.server_url} refused the password. Set LITTLE_MCP_PASSWORD "
                     "in this computer's .env to the same value as on the server, then start again."
+                ) from None
+            if self.server_url and _server_unreachable(error):
+                raise ConnectionError(
+                    f"No MCP server answered at {self.server_url}. Check that it is running on the "
+                    "server machine (MCP_HOST=0.0.0.0 python -m little_mcp.server --transport http), "
+                    "and see \"If it doesn't connect\" in the README."
                 ) from None
             raise
 

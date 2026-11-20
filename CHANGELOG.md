@@ -7,7 +7,8 @@
   before MCP sees it. Until now, anything that could reach the port could call
   every tool, including the ones that change data, without being asked. Empty
   means no password, as before; the server then warns when it listens on the network.
-- A wrong password now says so in plain words, instead of an `ExceptionGroup`.
+- A wrong password, or a server that doesn't answer at `--server-url`, now says so
+  in plain words, instead of `ExceptionGroup: unhandled errors in a TaskGroup`.
 - `install.sh` checks for an NVIDIA or AMD graphics card before offering `qwen3:4b`.
   Without one (a virtual machine, most laptops), it says the 2.5 GB model would be
   very slow, before you download it rather than after.

@@ -360,7 +360,7 @@ python -m little_mcp --provider anthropic --server-url http://SERVER_IP:8000/mcp
 | What you see | Likely cause |
 |---|---|
 | `connection timed out` | The server machine's firewall: see step 4. |
-| `connection refused` | The server isn't running, or it was started without `MCP_HOST=0.0.0.0`. |
+| `connection refused`, or `No MCP server answered` | The server isn't running, or it was started without `MCP_HOST=0.0.0.0`. Note that `python -m little_mcp` starts the *chat*, not the server. |
 | `refused the password`, or `401 Unauthorized` | The client's password is missing or differs from the server's `LITTLE_MCP_PASSWORD`. |
 | `ping SERVER_IP` fails too | The machines aren't on the same network. |
 

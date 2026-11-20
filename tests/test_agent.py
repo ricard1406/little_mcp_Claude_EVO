@@ -207,3 +207,23 @@ def test_a_refused_password_is_recognised_inside_the_error_group():
     other = httpx.HTTPStatusError("500", request=request, response=httpx.Response(500, request=request))
     assert not agent._password_refused(ExceptionGroup("task group", [other]))
     assert not agent._password_refused(ConnectionRefusedError())
+
+
+def test_an_unreachable_server_is_recognised_inside_the_error_group():
+    import httpx
+
+    from little_mcp import agent
+
+    assert agent._server_unreachable(ExceptionGroup("task group", [httpx.ConnectError("refused")]))
+    assert agent._server_unreachable(ExceptionGroup("task group", [httpx.ConnectTimeout("firewall")]))
+    assert not agent._server_unreachable(ExceptionGroup("task group", [ValueError("other")]))
+
+
+async def test_no_server_gives_a_plain_message():
+    import pytest
+
+    from little_mcp import agent
+
+    with pytest.raises(ConnectionError, match="No MCP server answered at http://127.0.0.1:9/mcp"):
+        async with agent.LittleAgent(llm=None, server_url="http://127.0.0.1:9/mcp"):
+            pass
