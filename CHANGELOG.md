@@ -1,11 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- **New tool `get_public_ip`:** the public IP address of the machine that runs the server
-  (read-only, uses [ipify](https://www.ipify.org), no API key). When the server runs on
-  another computer, it is that computer's address, not yours.
-
 ## 0.7.0: myTinySQL, 2026-11-14
 
 Little MCP gets its own database: a Python port of

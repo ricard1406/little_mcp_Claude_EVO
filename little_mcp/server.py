@@ -11,7 +11,6 @@ Run it:
 """
 
 import argparse
-import ipaddress
 import logging
 import sys
 from datetime import datetime
@@ -59,7 +58,7 @@ mcp = FastMCP(
     "little-mcp",
     instructions=(
         "Tools for a small business assistant: current time and weather for a city, "
-        "the server's public IP address, arithmetic,search over the user's local documents, a warehouse inventory "
+        "arithmetic, search over the user's local documents, a warehouse inventory "
         "with the tables FRUITS and VEGGIE, and a small SQL database (myTinySQL) "
         "where the user can keep tables of their own."
     ),
@@ -157,26 +156,6 @@ def get_weather(city: str) -> dict:
         "humidity_pct": data["main"]["humidity"],
         "wind_m_s": data.get("wind", {}).get("speed"),
     }
-
-
-# --- Network ------------------------------------------------------------------
-
-
-@mcp.tool(annotations=READ_ONLY_WEB)
-def get_public_ip() -> dict:
-    """The public IP address this server uses on the internet (the address websites see).
-
-    It is the address of the machine that runs this server, which may not be the user's own computer.
-    """
-    # ipify needs no API key. It only sees the address it is asked about, so nothing else leaves the machine.
-    try:
-        response = requests.get("https://api.ipify.org", params={"format": "json"}, timeout=config.HTTP_TIMEOUT)
-        response.raise_for_status()
-        # ip_address() checks that the reply really is an IP address, not an error page or other text.
-        ip = ipaddress.ip_address(response.json()["ip"])
-    except (requests.RequestException, ValueError, KeyError, TypeError) as e:
-        raise ValueError(f"Could not get the public IP address ({type(e).__name__}).") from e
-    return {"public_ip": str(ip), "version": f"IPv{ip.version}"}
 
 
 # --- Calculator ---------------------------------------------------------------

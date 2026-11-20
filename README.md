@@ -33,7 +33,7 @@ Assistant: Yes, there are 3 oranges in stock.
  └───────────────▲──────────────────────────────────────────┘
                  │  MCP over stdio (automatic) or HTTP
  ┌───────────────┴──────── server (little_mcp.server) ──────┐
- │  get_datetime   get_weather   get_public_ip   calculate  │
+ │  get_datetime   get_weather   calculate                  │
  │  search_documents (your PDFs)                            │
  │  list_inventory  find_item  adjust_stock  set_stock      │
  │  tiny_sql_read  tiny_sql_write (myTinySQL)               │
