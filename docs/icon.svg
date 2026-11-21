@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!-- Little MCP: a chat bubble with three linked tools, in the page's orange. -->
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="#f97316"/>
+  <path d="M28 34 h72 a10 10 0 0 1 10 10 v36 a10 10 0 0 1 -10 10 h-38 l-18 16 v-16 h-16 a10 10 0 0 1 -10 -10 v-36 a10 10 0 0 1 10 -10 z"
+        fill="#ffffff"/>
+  <g fill="#f97316">
+    <circle cx="44" cy="62" r="8"/>
+    <circle cx="64" cy="62" r="8"/>
+    <circle cx="84" cy="62" r="8"/>
+  </g>
+  <g stroke="#f97316" stroke-width="4">
+    <line x1="52" y1="62" x2="56" y2="62"/>
+    <line x1="72" y1="62" x2="76" y2="62"/>
+  </g>
+</svg>

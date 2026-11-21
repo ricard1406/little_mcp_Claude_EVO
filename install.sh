@@ -64,6 +64,28 @@ gpu_found() {
     if [[ ${cards,,} =~ nvidia|amd/ati|radeon ]]; then echo yes; else echo no; fi
 }
 
+# The apps menu entry: a .desktop file in the user's own folder, so it needs no sudo.
+APPS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+DESKTOP_FILE="$APPS_DIR/little-mcp.desktop"
+
+add_icon() {
+    local here
+    here="$(pwd)"
+    mkdir -p "$APPS_DIR"
+    # Exec in double quotes, so a folder with spaces works.
+    cat > "$DESKTOP_FILE" <<ENTRY
+[Desktop Entry]
+Type=Application
+Name=Little MCP
+Comment=Chat with an AI agent and its tools
+Exec="$here/launch.sh"
+Icon=$here/docs/icon.svg
+Terminal=false
+Categories=Utility;
+ENTRY
+    update-desktop-database "$APPS_DIR" 2>/dev/null || true
+}
+
 pull_model() {  # pull_model name "description" default
     if ollama list 2>/dev/null | grep -q "^$1"; then
         echo "$1 is already downloaded."
@@ -87,6 +109,7 @@ This script can do the following steps. It asks you before each one.
   5. Ollama models (optional)
        $EMBED_MODEL     about 270 MB   for searching your documents
        $CHAT_MODEL             about 2.5 GB   for chatting locally, without Claude
+  6. Apps menu icon (optional)   start Little MCP with a click, no terminal
 
 Steps 1-3 are required. If you have a Claude API key, you can skip steps 4-5:
 everything works except searching your documents, which needs $EMBED_MODEL.
@@ -166,14 +189,36 @@ if command -v ollama >/dev/null; then
     fi
 fi
 
+title "6. Apps menu icon (optional)"
+if [[ -f "$DESKTOP_FILE" ]] && grep -qF "Exec=\"$(pwd)/launch.sh\"" "$DESKTOP_FILE"; then
+    echo "Already there."
+elif ask "Add a Little MCP icon to the apps menu?" y; then
+    add_icon
+    echo "Added. It opens the page by itself; the ⏻ Quit button in the page stops the app."
+    echo "To remove it later: rm $DESKTOP_FILE"
+else
+    echo "Skipped."
+fi
+
 title "All set!"
 # No --provider here: the model is chosen in the page's ⚙️ Settings tab, and a flag
 # would override that choice at every start.
-cat <<EOF
+if [[ -f "$DESKTOP_FILE" ]]; then
+    cat <<EOF
+Next: open the apps menu (the Super key, or "Show Apps"), type Little and click
+Little MCP. The page opens in your browser.
+
+Or from a terminal:  source .venv/bin/activate  then  python -m little_mcp
+EOF
+else
+    cat <<EOF
 Next:
   1. Activate the project:    source .venv/bin/activate
   2. Start the app:           python -m little_mcp
   3. Open in your browser:    http://127.0.0.1:7860
+EOF
+fi
+cat <<EOF
 
 The first time, the page opens on ⚙️ Settings: choose the AI model, paste your
 keys and press Save. (You can also edit the .env file by hand: nano .env)

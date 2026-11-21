@@ -18,3 +18,4 @@ chroma_db/
 .ipynb_checkpoints/
 .claude/settings.local.json
 .DS_Store
+data/little_mcp.log

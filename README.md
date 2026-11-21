@@ -26,7 +26,7 @@ Assistant: Yes, there are 3 oranges in stock.
 
 ## Quick start (Ubuntu / Debian)
 
-Five commands, then your browser:
+Three commands, then a click:
 
 ```bash
 sudo apt install -y git
@@ -37,18 +37,15 @@ git clone https://github.com/ricard1406/little_mcp_Claude_EVO.git && cd little_m
 ```bash
 ./install.sh
 ```
-```bash
-source .venv/bin/activate
-```
-```bash
-python -m little_mcp
-```
 
-Open **http://127.0.0.1:7860**. The first time, the page opens on **⚙️ Settings**:
-choose the AI model, paste your Claude API key, press **💾 Save**, and chat.
+Say yes to the last step, the **apps menu icon**. Then open the apps menu (the
+Super key), type *Little* and click **Little MCP**: the page opens in your browser.
+The first time it opens on **⚙️ Settings**: choose the AI model, paste your Claude
+API key, press **💾 Save**, and chat. **⏻ Quit**, at the top of the page, stops it.
 
-Next time, only the last two commands. Everything else (what the installer
-asks, the settings, more options) is below, when you need it.
+Next time, just the icon. Prefer the terminal? `source .venv/bin/activate`, then
+`python -m little_mcp`, and open http://127.0.0.1:7860. Everything else (what the
+installer asks, the settings, more options) is below, when you need it.
 
 ## How it works
 
@@ -86,6 +83,7 @@ before each step**, so nothing is downloaded without your OK:
 | [Ollama](https://ollama.com), to run AI models locally | often more than 1 GB | only without Claude, or for document search |
 | `nomic-embed-text` model | about 270 MB | for document search |
 | `qwen3:4b` chat model | about 2.5 GB | only to chat without Claude, and very slow without an NVIDIA or AMD graphics card (the script tells you if it finds none) |
+| Apps menu icon | none | no: it starts the app with a click, without a terminal |
 
 **With a Claude API key you can skip Ollama.** Everything works except
 searching your documents. Steps that are already done are skipped, so you can
@@ -166,6 +164,8 @@ In nano, save with `Ctrl+O` then `Enter`, and quit with `Ctrl+X`.
 | Command | What it does |
 |---|---|
 | `python -m little_mcp` | Web UI at http://127.0.0.1:7860, with the model chosen in ⚙️ Settings |
+| `./launch.sh` | What the apps menu icon runs: starts the app in the background and opens the page, or only opens the page if the app is already running. Its messages go to `data/little_mcp.log` |
+| `python -m little_mcp --open-browser` | Also open the page in the browser when it is ready |
 | `python -m little_mcp text` | Chat in the terminal instead |
 | `python -m little_mcp --provider anthropic` | Use Claude (default model `claude-opus-5-5`) |
 | `python -m little_mcp --think` | Also show the model's reasoning and every tool call |
@@ -174,6 +174,10 @@ In nano, save with `Ctrl+O` then `Enter`, and quit with `Ctrl+X`.
 
 Flags can be combined. `python -m little_mcp --help` lists them all. A flag
 wins over the choice saved in ⚙️ Settings, for that run.
+
+To stop the app: **⏻ Quit** at the top of the page, or Ctrl+C in its terminal.
+Both close it cleanly, sharing included. Started from the icon, the app has no
+terminal, so Quit is the way: closing the browser tab leaves it running.
 
 ### Changing your data is always your call
 

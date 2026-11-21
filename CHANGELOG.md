@@ -51,6 +51,21 @@
   section the tab got longer than a screen, and in a test the form looked done while
   Save, out of sight, was never pressed.
 
+### An icon in the apps menu: no terminal at all
+- **`install.sh` step 6** adds a "Little MCP" icon to the apps menu (a `.desktop`
+  file in your own folder, no sudo). One click starts the app and opens the page;
+  a second click only opens the page again, instead of starting a second app.
+- **`launch.sh`**, what the icon runs: the app's messages go to `data/little_mcp.log`,
+  and if the app can't start, a desktop notification says so and where to look.
+- **⏻ Quit** at the top of the page stops the app cleanly, sharing included. Started
+  from the icon there is no terminal and no Ctrl+C. Quit doesn't send Ctrl+C to the
+  app: a program started in the background ignores it, and the app would have kept
+  running unseen.
+- `--open-browser` opens the page when it is ready.
+- **Gradio's usage statistics are off.** Gradio sent them to huggingface.co by
+  default; the log of a test showed it. This app says where your data goes, and that
+  was a place nobody chose.
+
 ### Other changes
 - **An optional password for the HTTP server.** Set `LITTLE_MCP_PASSWORD` in `.env`
   on the server and on the client. The server then refuses any request without it,

@@ -71,6 +71,8 @@ def parse_args(argv=None):
                         "never: change the data without asking\n"
                         "(default: the choice saved in the ⚙️ Settings tab, otherwise always)")
     p.add_argument("--allow-writes", action="store_true", help="the same as --ask never")
+    p.add_argument("--open-browser", action="store_true",
+                   help="open the page in the browser when it is ready (the desktop icon uses it)")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     args = p.parse_args(argv)
     if args.allow_writes:
@@ -275,7 +277,13 @@ def welcome_text(problem: str) -> str:
 
 
 def run_graph(args, llm) -> None:
+    # Gradio sends usage statistics to huggingface.co by default. Off: this app tells its users
+    # where their data goes (DISCLAIMER.md), and that was a place nobody chose. Set before the
+    # import, so it also covers the statistics Gradio sends when the page starts.
+    os.environ.setdefault("GRADIO_ANALYTICS_ENABLED", "False")
     import gradio as gr
+
+    quit_requested = threading.Event()  # set by the ⏻ Quit button
 
     # What the ⚙️ Settings tab can change while the app runs. A turn reads it when it starts.
     live = {"llm": llm, "provider": args.provider, "ask": args.ask, "show_tools": settings.show_tools(),
@@ -389,10 +397,19 @@ def run_graph(args, llm) -> None:
     def past_chats(selected: str | None = None):
         return gr.update(choices=[(c.label, c.id) for c in history.chats()], value=selected)
 
-    with gr.Blocks(title="Little MCP EVO") as demo:
+    with gr.Blocks(title="Little MCP EVO", analytics_enabled=False) as demo:
         chat_id = gr.State("")  # the conversation this browser tab is looking at
 
-        gr.Markdown("## Little MCP EVO\nWeather, time, arithmetic, your documents, the warehouse and your own tables.")
+        with gr.Row():
+            gr.Markdown("## Little MCP EVO\nWeather, time, arithmetic, your documents, the warehouse and your own tables.")
+            # Started from the desktop icon, the app has no terminal and no Ctrl+C: this is its off switch.
+            quit_button = gr.Button("⏻ Quit", size="sm", scale=0, min_width=90)
+        with gr.Row(visible=False) as quit_confirm:
+            gr.Markdown("**Stop Little MCP?** The chats and your data stay saved. "
+                        "Other computers that use this one's tools lose them until you start it again.")
+            quit_yes = gr.Button("⏻ Yes, stop", variant="stop", size="sm", scale=0, min_width=120)
+            quit_no = gr.Button("Cancel", size="sm", scale=0, min_width=90)
+        stopped = gr.Markdown("", visible=False)
 
         with gr.Tabs(selected="chat") as tabs:
             with gr.Tab("💬 Chat", id="chat"):
@@ -720,13 +737,27 @@ def run_graph(args, llm) -> None:
                                    net_password, chat_id],
                    [save_result, claude_key, weather_key, welcome, tabs, chatbot, share_info, server_address]
                    ).then(None, js="() => window.scrollTo({top: 0, behavior: 'smooth'})")
+        def stop_app():
+            # The same as Ctrl+C in the terminal: the main thread below closes the MCP session,
+            # stops sharing and closes the page. Half a second later, so this answer reaches the page.
+            # Not by sending ourselves Ctrl+C (SIGINT): a program started in the background, as the
+            # desktop icon does, ignores it, and the app would go on running unseen.
+            threading.Timer(0.5, quit_requested.set).start()
+            return {quit_confirm: gr.update(visible=False), tabs: gr.update(visible=False),
+                    stopped: gr.update(visible=True, value="### ⏻ Little MCP has stopped.\nYou can close this "
+                                       "tab. To start it again, click the Little MCP icon, or run "
+                                       "`python -m little_mcp`.")}
+
+        quit_button.click(lambda: gr.update(visible=True), None, [quit_confirm])
+        quit_no.click(lambda: gr.update(visible=False), None, [quit_confirm])
+        quit_yes.click(stop_app, None, [quit_confirm, tabs, stopped])
         demo.load(on_page_load, None, [past, provider, ask_when, show_tools, claude_key, weather_key, welcome, tabs,
                                        network, server_address, net_password, share_info, remote_box, password_row,
                                        make_password, test_server, server_result])
 
     # server_name stays 127.0.0.1 (Gradio's default) on purpose: the Settings tab shows and
     # changes your keys, so this page must never be reachable from another computer.
-    demo.launch(share=False, server_name="127.0.0.1", prevent_thread_lock=True,
+    demo.launch(share=False, server_name="127.0.0.1", prevent_thread_lock=True, inbrowser=args.open_browser,
                 css="#chat-history { max-height: 60vh; overflow-y: auto; } #usage { opacity: 0.7; font-size: 0.9em; }"
                     " #settings { max-width: 760px; }"
                     # Gradio's outer box has overflow: hidden, which turns "sticky" off for everything
@@ -738,8 +769,9 @@ def run_graph(args, llm) -> None:
                     # a browser that doesn't shows the letters, on your own screen only.
                     " .secret input, .secret textarea { -webkit-text-security: disc; }")
     try:
-        while True:  # the web server runs in its own thread; this one waits for Ctrl+C
-            time.sleep(0.5)
+        # The web server runs in its own thread; this one waits for ⏻ Quit or Ctrl+C.
+        while not quit_requested.wait(0.5):
+            pass
     except KeyboardInterrupt:
         print("\nClosing...")
     finally:

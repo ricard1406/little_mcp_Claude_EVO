@@ -127,3 +127,8 @@ def test_hidden_tools_leave_only_the_question_and_the_answer():
         add_to_chat(shown, boxes, event, think=False, show_tools=False)
     # The result must not land in the last message shown, which here is the user's question.
     assert shown == [{"role": "user", "content": "Oranges?"}, {"role": "assistant", "content": "Yes, 3."}]
+
+
+def test_the_desktop_icon_asks_the_app_to_open_the_browser():
+    assert parse_args(["--open-browser"]).open_browser
+    assert not parse_args([]).open_browser
