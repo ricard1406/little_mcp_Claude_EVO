@@ -485,8 +485,12 @@ def run_graph(args, llm) -> None:
                                              info="Free at openweathermap.org/api. A new key can take 2 hours "
                                                   "to work. Leave it empty to keep the saved key.")
 
-                    save = gr.Button("💾 Save", variant="primary")
-                    save_result = gr.Markdown("")
+                    # Pinned to the bottom of the window (#save-bar in the CSS): the tab is longer
+                    # than a screen, and a first test showed that a Save button out of sight gets
+                    # forgotten. The form then looks done, but nothing was saved.
+                    with gr.Column(elem_id="save-bar"):
+                        save = gr.Button("💾 Save", variant="primary")
+                        save_result = gr.Markdown("")
                     gr.Markdown("Settings are saved in the `.env` file of the project. "
                                 "An option on the command line, such as `--provider`, wins over them.",
                                 elem_id="usage")
@@ -725,6 +729,11 @@ def run_graph(args, llm) -> None:
     demo.launch(share=False, server_name="127.0.0.1", prevent_thread_lock=True,
                 css="#chat-history { max-height: 60vh; overflow-y: auto; } #usage { opacity: 0.7; font-size: 0.9em; }"
                     " #settings { max-width: 760px; }"
+                    # Gradio's outer box has overflow: hidden, which turns "sticky" off for everything
+                    # inside it. "clip" cuts off what sticks out just the same, but leaves sticky working.
+                    " .gradio-container { overflow: clip !important; }"
+                    " #save-bar { position: sticky; bottom: 0; z-index: 10; padding: 10px 0;"
+                    " background: var(--body-background-fill); border-top: 1px solid var(--border-color-primary); }"
                     # Dots instead of letters in the key fields. Chrome, Edge and Safari support it;
                     # a browser that doesn't shows the letters, on your own screen only.
                     " .secret input, .secret textarea { -webkit-text-security: disc; }")

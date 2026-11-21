@@ -47,6 +47,9 @@
 - The server's "wrong password" answer points to ⚙️ Settings, not only to `.env`.
 - At start, a missing key no longer prints "Set ANTHROPIC_API_KEY in your .env
   file" next to "the page will open on Settings": just the page.
+- **The 💾 Save button stays in view** at the bottom of the window. With the Network
+  section the tab got longer than a screen, and in a test the form looked done while
+  Save, out of sight, was never pressed.
 
 ### Other changes
 - **An optional password for the HTTP server.** Set `LITTLE_MCP_PASSWORD` in `.env`
