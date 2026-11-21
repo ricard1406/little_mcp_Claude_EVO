@@ -16,7 +16,8 @@ import threading
 import time
 from collections import defaultdict
 
-from . import __version__, config, logs, settings
+from . import config, logs, settings
+from .version import describe as version
 from .agent import DEFAULT_CLAUDE_MODEL, DEFAULT_OLLAMA_MODEL, Event, LittleAgent, build_llm
 from .history import ChatHistory, usage_totals
 from .sharing import Sharing, firewall_on, this_computer_addresses
@@ -81,7 +82,7 @@ def parse_args(argv=None):
                         f"to the console and to the log ({logs.LOG_FILE.relative_to(config.PROJECT_ROOT)})")
     p.add_argument("--open-browser", action="store_true",
                    help="open the page in the browser when it is ready (the desktop icon uses it)")
-    p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    p.add_argument("--version", action="version", version=f"Little MCP {version()}")
     args = p.parse_args(argv)
     if args.allow_writes:
         args.ask = "never"
@@ -246,7 +247,7 @@ def _print_event(event, think: bool) -> None:
 def _banner(args, agent) -> None:
     model = args.model or (DEFAULT_CLAUDE_MODEL if args.provider == "anthropic" else DEFAULT_OLLAMA_MODEL)
     print("=" * 60)
-    print(f"  Little MCP EVO v{__version__}")
+    print(f"  Little MCP {version()}")
     print(f"  Provider : {args.provider}   Model: {model}")
     print(f"  Server   : {args.server_url or 'started automatically (stdio)'}")
     print(f"  Tools    : {', '.join(t.name for t in agent.tools)}")
@@ -426,7 +427,11 @@ def run_graph(args, llm) -> None:
         chat_id = gr.State("")  # the conversation this browser tab is looking at
 
         with gr.Row():
-            gr.Markdown("## Little MCP EVO\nWeather, time, arithmetic, your documents, the warehouse and your own tables.")
+            with gr.Column():
+                gr.Markdown("## Little MCP EVO\nWeather, time, arithmetic, your documents, the warehouse and "
+                            "your own tables.")
+                # Small, under the title: a screenshot of the page says which code it came from.
+                gr.Markdown(f"Little MCP {version()}", elem_id="usage")
             # Started from the desktop icon, the app has no terminal and no Ctrl+C: this is its off switch.
             quit_button = gr.Button("⏻ Quit", size="sm", scale=0, min_width=90)
         with gr.Row(visible=False) as quit_confirm:
@@ -845,6 +850,8 @@ def main(argv=None) -> None:
     args = parse_args(argv)
     logs.rotate()
     logs.setup(verbose=args.verbose)
+    # First, so whoever reads the screen (or a screenshot of it) knows exactly which code runs.
+    print(f"Little MCP {version()}")
     if args.provider is None:  # chosen here, not in parse_args: it may ask Ollama what is downloaded
         args.provider = settings.default_provider(args.model or DEFAULT_OLLAMA_MODEL)
     try:
@@ -857,7 +864,7 @@ def main(argv=None) -> None:
         print("⚠️  The AI model isn't set up yet. Open the page: it starts on ⚙️ Settings, "
               "where you can choose the model and paste your key.")
         llm = None
-    app_log.info("started: Little MCP %s, %s, model %s, network %s%s", __version__,
+    app_log.info("started: Little MCP %s, %s, model %s, network %s%s", version(),
                  "web page" if args.mode == "graph" else "terminal chat", args.provider,
                  "remote " + args.server_url if args.server_url else settings.network_mode(),
                  "" if llm else " (no model set up yet)")

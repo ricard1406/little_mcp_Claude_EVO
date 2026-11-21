@@ -448,7 +448,10 @@ def serve_http() -> None:
     Starting uvicorn here also lets the filter above know when it is stopping.
     """
     server = http_server(config.MCP_HOST, config.MCP_PORT, config.MCP_PASSWORD)
-    log.info("Little MCP server on http://%s:%s/mcp (Ctrl+C to stop)", config.MCP_HOST, config.MCP_PORT)
+    from .version import describe
+
+    log.info("Little MCP server %s on http://%s:%s/mcp (Ctrl+C to stop)", describe(), config.MCP_HOST,
+             config.MCP_PORT)
     if config.MCP_PASSWORD:
         log.info("Password: on. Clients need the same LITTLE_MCP_PASSWORD.")
     elif not _only_this_computer(config.MCP_HOST):

@@ -166,6 +166,7 @@ In nano, save with `Ctrl+O` then `Enter`, and quit with `Ctrl+X`.
 | `python -m little_mcp` | Web UI at http://127.0.0.1:7860, with the model chosen in ⚙️ Settings |
 | `./launch.sh` | What the apps menu icon runs: starts the app in the background and opens the page, or only opens the page if the app is already running. What it would print on a terminal goes to `data/logs/console.log` |
 | `python -m little_mcp --open-browser` | Also open the page in the browser when it is ready |
+| `python -m little_mcp --version` | Which code exactly: `Little MCP 0.7.0 · commit fe4c8dd (2026-11-21)`. The same line opens the console, the page (under the title) and each start in the log. `+ local changes` means a project file was edited after that commit; without git (a ZIP download) only the version shows |
 | `python -m little_mcp --verbose` | Also show the technical details (every HTTP request, the libraries' messages), on the console and in the log |
 | `python -m little_mcp text` | Chat in the terminal instead |
 | `python -m little_mcp --provider anthropic` | Use Claude (default model `claude-opus-5-5`) |

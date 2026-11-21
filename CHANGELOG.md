@@ -66,6 +66,10 @@
 - The app and its MCP server write to the same file; it is rotated at start when it
   passes 2 MB, keeping three old ones. Never in it: passwords, keys, chat text.
 - `--verbose` shows the technical details too, on the console and in the log.
+- **Which code exactly runs:** `Little MCP 0.7.0 · commit fe4c8dd (2026-11-21)` opens the
+  console, sits under the page's title, starts each run in the log, and answers
+  `--version`. The version changes at a release, the commit with every change; `+ local
+  changes` flags a project file edited by hand. Without git, only the version.
 
 ### An icon in the apps menu: no terminal at all
 - **`install.sh` step 6** adds a "Little MCP" icon to the apps menu (a `.desktop`
