@@ -361,13 +361,39 @@ class PasswordCheck:
                 await send({"type": "http.response.start", "status": 401,
                             "headers": [(b"content-type", b"text/plain; charset=utf-8")]})
                 await send({"type": "http.response.body",
-                            "body": b"Wrong or missing password: set LITTLE_MCP_PASSWORD in the client's .env.\n"})
+                            "body": "Wrong or missing password. On the other computer: ⚙️ Settings → Network → "
+                                    "Network password (or LITTLE_MCP_PASSWORD in its .env).\n".encode()})
                 return
         await self.app(scope, receive, send)
 
 
 def _only_this_computer(host: str) -> bool:
     return host in ("127.0.0.1", "localhost", "::1")
+
+
+def http_server(host: str, port: int, password: str):
+    """The HTTP server, ready to run: for --transport http, and for the app's "Share" setting.
+
+    It can be built again after a stop, so the app can turn sharing off and on.
+    """
+    import uvicorn
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    # The MCP library runs a session manager only once, and keeps it after the first start
+    # (a private attribute: checked against mcp 1.30). A new start needs a new one.
+    mcp._session_manager = None
+    if not _only_this_computer(host):
+        # Created for 127.0.0.1, FastMCP accepts only requests addressed to "localhost": a
+        # protection against web pages that call a server on your own computer (DNS rebinding).
+        # On the network, other computers address this one by its IP or name, so it must go,
+        # as with MCP_HOST=0.0.0.0. The password still guards the tools: such a page can't know it.
+        mcp.settings.transport_security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    app = mcp.streamable_http_app()
+    if password:
+        app = PasswordCheck(app, password)
+    server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level=mcp.settings.log_level.lower()))
+    logging.getLogger("uvicorn.error").addFilter(_QuietShutdown(server))
+    return server
 
 
 def serve_http() -> None:
@@ -377,14 +403,7 @@ def serve_http() -> None:
     again so the program ends. Nothing caught it, so Python printed a traceback.
     Starting uvicorn here also lets the filter above know when it is stopping.
     """
-    import uvicorn
-
-    app = mcp.streamable_http_app()
-    if config.MCP_PASSWORD:
-        app = PasswordCheck(app, config.MCP_PASSWORD)
-    server = uvicorn.Server(uvicorn.Config(app, host=config.MCP_HOST, port=config.MCP_PORT,
-                                          log_level=mcp.settings.log_level.lower()))
-    logging.getLogger("uvicorn.error").addFilter(_QuietShutdown(server))
+    server = http_server(config.MCP_HOST, config.MCP_PORT, config.MCP_PASSWORD)
     log.info("Little MCP server on http://%s:%s/mcp (Ctrl+C to stop)", config.MCP_HOST, config.MCP_PORT)
     if config.MCP_PASSWORD:
         log.info("Password: on. Clients need the same LITTLE_MCP_PASSWORD.")

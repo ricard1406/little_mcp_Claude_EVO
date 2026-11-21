@@ -30,6 +30,24 @@
 - **README: a 5-command Quick start** at the top. The details of the installer and
   the settings moved to "Installation in detail".
 
+### ⚙️ Settings → Network: two computers without the terminal
+- **Share this computer's tools with other computers.** The HTTP server now runs
+  inside the app, next to its own chat: one command, one terminal. The tab shows the
+  addresses to use, the password, the Claude Code command to copy, and the firewall
+  command when `ufw` is on. Sharing starts by itself at the next launch.
+- **Use the tools of another computer.** Type its address as you like it
+  (`192.168.1.20`, `ubuntu-TEST.local`): the page completes it. **🔌 Test the
+  connection** lists the other computer's tools, or says in plain words what's wrong.
+- **🎲 Make one** creates a network password. It is shown, not hidden, because you
+  type it on the other computer; the API keys stay hidden.
+- The server can be started and stopped again in the same run. Shared on the
+  network, it accepts requests addressed by IP or name: the MCP library's localhost
+  check is turned off there, as with `MCP_HOST=0.0.0.0`, and the password guards the tools.
+- A busy port is explained ("maybe a Little MCP server started in a terminal").
+- The server's "wrong password" answer points to ⚙️ Settings, not only to `.env`.
+- At start, a missing key no longer prints "Set ANTHROPIC_API_KEY in your .env
+  file" next to "the page will open on Settings": just the page.
+
 ### Other changes
 - **An optional password for the HTTP server.** Set `LITTLE_MCP_PASSWORD` in `.env`
   on the server and on the client. The server then refuses any request without it,

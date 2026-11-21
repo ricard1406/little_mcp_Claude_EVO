@@ -133,6 +133,7 @@ ollama pull nomic-embed-text
 | AI model | Claude (needs an API key) or the local model with Ollama. **🔑 Test the key** checks a key for free. |
 | Ask before changing data | Always, not for new rows, or never (see [below](#changing-your-data-is-always-your-call)). |
 | Show the tools in the chat | Yes: each tool the AI uses appears in a box, with what it sent and what came back. No: only the answers. |
+| Network | Only this computer, share its tools with other computers, or use another computer's tools (see [below](#use-the-server-from-another-machine)). |
 | Weather | An optional OpenWeather key. |
 
 **💾 Save** writes them to the `.env` file of the project and takes you back to
@@ -287,7 +288,30 @@ itself. It works the same way across two virtual machines.
 - **The client machine** runs the chat: Claude Code, or `python -m little_mcp`
   with Claude or its own Ollama model.
 
-### On the server machine
+### The easy way: the ⚙️ Settings tab
+
+No second terminal and no commands to remember:
+
+1. **On the server machine**, in ⚙️ Settings → **Network**, choose *Share this
+   computer's tools with other computers*. Press **🎲 Make one** for a password
+   (or leave it empty for none), then **💾 Save**. The tab now shows 🟢 **Sharing**,
+   the addresses to use, the password, and the Claude Code command to copy.
+2. **On the client machine**, in ⚙️ Settings → **Network**, choose *Use the tools of
+   another computer*. Type the server's address as the page shows it, for example
+   `192.168.1.20` or `ubuntu-TEST.local` (the page adds `http://`, `:8000` and
+   `/mcp`), and the same password. Press **🔌 Test the connection**: it should say
+   ✅ Connected, 10 tools. Then **💾 Save**.
+
+The server machine keeps chatting as before: sharing runs inside the app, next to
+its own chat, and starts by itself the next time you open the app. Choose *Only
+this computer* and Save to stop it. If the firewall (`ufw`) is on, the tab shows
+the command that lets the other computer in.
+
+### The terminal way
+
+The same, by hand. It's what the page does for you, and it still works.
+
+#### On the server machine
 
 1. Find its IP address (the first number is usually the one you need):
 
@@ -332,7 +356,7 @@ itself. It works the same way across two virtual machines.
    sudo ufw allow from CLIENT_IP to any port 8000 proto tcp
    ```
 
-### On the client machine
+#### On the client machine
 
 Put the server's IP address in place of `SERVER_IP`.
 

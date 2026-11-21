@@ -8,6 +8,7 @@ Secrets (API keys) never travel back to the browser. The page shows only their
 last 4 characters, and an empty field on Save means "keep the saved key".
 """
 
+import asyncio
 import os
 import shutil
 from pathlib import Path
@@ -34,6 +35,74 @@ WEATHER_KEY = "OPENWEATHER_API_KEY"
 
 def get(name: str, default: str = "") -> str:
     return os.getenv(name, default).strip()
+
+
+NETWORK = "LITTLE_MCP_NETWORK"
+SERVER_URL = "LITTLE_MCP_SERVER_URL"
+PASSWORD = "LITTLE_MCP_PASSWORD"
+
+NETWORK_MODES = {
+    "local": "Only this computer",
+    "share": "Share this computer's tools with other computers",
+    "remote": "Use the tools of another computer",
+}
+
+
+def network_mode() -> str:
+    mode = get(NETWORK, "local").lower()
+    return mode if mode in NETWORK_MODES else "local"
+
+
+def server_url(typed: str) -> str:
+    """What a user types, made into a full server address.
+
+    "192.168.1.20" or "ubuntu-TEST.local" -> "http://192.168.1.20:8000/mcp"; a full address stays as it is.
+    """
+    from urllib.parse import urlsplit, urlunsplit
+
+    typed = typed.strip()
+    if not typed:
+        return ""
+    if "://" not in typed:
+        typed = "http://" + typed
+    parts = urlsplit(typed)
+    # netloc, not hostname: hostname lowercases the name, and the page should show what the user wrote.
+    host = parts.netloc if parts.port else f"{parts.netloc}:{config.MCP_PORT}"
+    return urlunsplit((parts.scheme, host, parts.path if parts.path not in ("", "/") else "/mcp", "", ""))
+
+
+def new_password() -> str:
+    """A random password, easy to copy: 12 letters, digits, - and _."""
+    import secrets
+
+    return secrets.token_urlsafe(9)
+
+
+async def check_server(url: str, password: str) -> tuple[bool, str]:
+    """Connect to an MCP server the way the chat does, and list its tools."""
+    from langchain_mcp_adapters.client import MultiServerMCPClient
+
+    from .agent import _password_refused, _server_unreachable
+
+    if not url:
+        return False, "Write the address of the other computer first."
+    connection = {"transport": "streamable_http", "url": url, "timeout": 10}
+    if password:
+        connection["headers"] = {"Authorization": f"Bearer {password}"}
+    try:
+        async with MultiServerMCPClient({"other": connection}).session("other") as session:
+            tools = (await session.list_tools()).tools
+    except BaseException as error:  # the MCP client wraps its errors in an ExceptionGroup
+        if isinstance(error, (KeyboardInterrupt, asyncio.CancelledError)):
+            raise
+        if _password_refused(error):
+            return False, "❌ The other computer refused the password. Type the one it shows in its ⚙️ Settings."
+        if _server_unreachable(error):
+            return False, (f"❌ Nothing answered at `{url}`. Is Little MCP running there, with "
+                           "\"Share this computer's tools\" on? Is the address right?")
+        return False, f"❌ Could not connect: {type(error).__name__}."
+    # In backticks: as a link it would invite a click, and a browser can't open an MCP address.
+    return True, f"✅ Connected to `{url}`: {len(tools)} tools."
 
 
 def show_tools() -> bool:

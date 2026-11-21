@@ -15,9 +15,10 @@ import threading
 import time
 from collections import defaultdict
 
-from . import __version__, settings
+from . import __version__, config, settings
 from .agent import DEFAULT_CLAUDE_MODEL, DEFAULT_OLLAMA_MODEL, Event, LittleAgent, build_llm
 from .history import ChatHistory, usage_totals
+from .sharing import Sharing, firewall_on, this_computer_addresses
 from .tinysql.database import only_inserts
 
 EXAMPLES = [
@@ -277,7 +278,47 @@ def run_graph(args, llm) -> None:
     import gradio as gr
 
     # What the ⚙️ Settings tab can change while the app runs. A turn reads it when it starts.
-    live = {"llm": llm, "provider": args.provider, "ask": args.ask, "show_tools": settings.show_tools()}
+    live = {"llm": llm, "provider": args.provider, "ask": args.ask, "show_tools": settings.show_tools(),
+            # --server-url on the command line means "use the tools of another computer", for this run.
+            "network": "remote" if args.server_url else settings.network_mode(),
+            "server_url": args.server_url or settings.get(settings.SERVER_URL),
+            "password": settings.get(settings.PASSWORD), "share_failure": ""}
+
+    # "Share this computer's tools": the HTTP server runs inside the app, no second terminal.
+    share = Sharing()
+    if live["network"] == "share":
+        live["share_failure"] = share.start(config.MCP_PORT, live["password"])
+        print(f"⚠️  Sharing did not start: {live['share_failure']}" if live["share_failure"] else
+              f"Sharing this computer's tools on port {config.MCP_PORT}, password "
+              f"{'on' if live['password'] else 'OFF'}. Details in ⚙️ Settings → Network.")
+
+    def server_for_chat() -> str | None:
+        """None: the chat starts its own server, as always. An address: it uses another computer's."""
+        return live["server_url"] if live["network"] == "remote" else None
+
+    def share_status() -> str:
+        """What the Network section says about sharing: where to connect, and how."""
+        if live["network"] != "share":
+            return ""
+        if not share.running:
+            return f"🔴 **Not sharing.** {live['share_failure']}"
+        addresses = this_computer_addresses()
+        header = f' --header "Authorization: Bearer {share.password}"' if share.password else ""
+        lines = ["🟢 **Sharing.** Other computers can use this computer's tools at:", ""]
+        lines += [f"- `http://{a}:{share.port}/mcp`" for a in addresses]
+        lines += ["", "Password: **on**." if share.password else
+                  "⚠️ **No password:** any device on your network can use every tool, "
+                  "including the ones that change your data."]
+        lines += ["", f"**On the other computer**, in Little MCP: ⚙️ Settings → Network → "
+                      f"*{settings.NETWORK_MODES['remote']}*, address `{addresses[0]}`"
+                      + (", and the same password." if share.password else "."),
+                  "", "In Claude Code:", "```bash",
+                  f"claude mcp add --transport http little-mcp http://{addresses[0]}:{share.port}/mcp{header}", "```"]
+        if firewall_on():
+            lines += ["", f"🧱 The firewall (ufw) is on and blocks other computers. Let one in, with its "
+                          f"IP address in place of OTHER_IP:", "```bash",
+                      f"sudo ufw allow from OTHER_IP to any port {share.port} proto tcp", "```"]
+        return "\n".join(lines)
 
     def model_for(provider: str) -> str | None:
         """--model was chosen for the provider given on the command line, not for the other one."""
@@ -320,7 +361,7 @@ def run_graph(args, llm) -> None:
 
     async def keep_agent(ready: asyncio.Future, stop: asyncio.Event) -> None:
         try:
-            async with LittleAgent(live["llm"], args.server_url, ask_in_browser,
+            async with LittleAgent(live["llm"], server_for_chat(), ask_in_browser,
                                    trim_history=live["provider"] == "ollama") as agent:
                 ready.set_result(agent)
                 await stop.wait()
@@ -416,6 +457,27 @@ def run_graph(args, llm) -> None:
                                           info="Yes: each tool the AI uses appears in a box, with what it sent "
                                                "and what came back (🛠️ get_datetime...). No: only the answers. "
                                                "The question before a change always appears.")
+
+                    gr.Markdown("### Network")
+                    network = gr.Radio(choices=[(label, value) for value, label in settings.NETWORK_MODES.items()],
+                                       value=live["network"], show_label=False,
+                                       info="Share: this computer runs the tools and keeps the data, and other "
+                                            "computers use them. The chat on this computer works in every case.")
+                    with gr.Group(visible=live["network"] == "remote") as remote_box:
+                        server_address = gr.Textbox(label="Address of the other computer", value=live["server_url"],
+                                                    placeholder="For example 192.168.1.20 or ubuntu-TEST.local",
+                                                    html_attributes=no_autofill)
+                    # The network password is shown, unlike the API keys: you have to read it here
+                    # and type it on the other computer. An API key costs money; this one guards a
+                    # home network, and the page itself is reachable only from this computer.
+                    with gr.Column(visible=live["network"] != "local") as password_row:
+                        net_password = gr.Textbox(label="Network password", html_attributes=no_autofill,
+                                                  info="The same on both computers. Empty: no password.")
+                        make_password = gr.Button("🎲 Make one", size="sm", visible=live["network"] == "share")
+                    test_server = gr.Button("🔌 Test the connection", size="sm",
+                                            visible=live["network"] == "remote")
+                    server_result = gr.Markdown("")
+                    share_info = gr.Markdown("")
 
                     gr.Markdown("### Weather (optional)")
                     weather_key = gr.Textbox(label="OpenWeather API key", elem_classes=["secret"],
@@ -545,11 +607,19 @@ def run_graph(args, llm) -> None:
             return {claude_key: field(settings.CLAUDE_KEY, "Paste your key: sk-ant-..."),
                     weather_key: field(settings.WEATHER_KEY, "Paste your key")}
 
+        def network_fields(mode: str) -> dict:
+            """Show only what the chosen network mode needs."""
+            return {remote_box: gr.update(visible=mode == "remote"), password_row: gr.update(visible=mode != "local"),
+                    make_password: gr.update(visible=mode == "share"), test_server: gr.update(visible=mode == "remote"),
+                    server_result: ""}
+
         def on_page_load():
             """Fill the settings, and open them first if the chat cannot work yet."""
             problem = problem_now()
             return {past: past_chats(), provider: live["provider"], ask_when: live["ask"],
                     show_tools: "yes" if live["show_tools"] else "no", **key_fields(),
+                    network: live["network"], server_address: live["server_url"], net_password: live["password"],
+                    share_info: share_status(), **network_fields(live["network"]),
                     welcome: gr.update(value=welcome_text(problem) if problem else "", visible=bool(problem)),
                     tabs: gr.Tabs(selected="settings" if problem else "chat")}
 
@@ -559,12 +629,23 @@ def run_graph(args, llm) -> None:
             _, verdict = await asyncio.to_thread(settings.check_claude_key, key)
             yield verdict if typed.strip() or not key else f"{verdict} (I tested the saved key.)"
 
+        async def test_the_server(typed_address: str, typed_password: str):
+            yield "⏳ Connecting..."
+            _, verdict = await settings.check_server(settings.server_url(typed_address), typed_password.strip())
+            yield verdict
+
         async def save_settings(chosen: str, typed_claude: str, typed_weather: str, ask_choice: str,
-                                tools_choice: str, current: str):
+                                tools_choice: str, mode: str, typed_address: str, typed_password: str, current: str):
             if turns:
                 return {save_result: "⏳ An answer is still being written. Wait for it, or press ⏹ Stop, "
                                      "then Save again."}
-            values = {settings.PROVIDER: chosen, settings.ASK: ask_choice, settings.SHOW_TOOLS: tools_choice}
+            url = settings.server_url(typed_address)
+            if mode == "remote" and not url:
+                return {save_result: "❌ Write the address of the other computer, then Save again."}
+            password = typed_password.strip()
+            values = {settings.PROVIDER: chosen, settings.ASK: ask_choice, settings.SHOW_TOOLS: tools_choice,
+                      settings.NETWORK: mode, settings.SERVER_URL: url or live["server_url"],
+                      settings.PASSWORD: password}
             if typed_claude.strip():
                 values[settings.CLAUDE_KEY] = typed_claude
             if typed_weather.strip():
@@ -575,10 +656,22 @@ def run_graph(args, llm) -> None:
                 return {save_result: f"❌ Could not save: {error}"}
 
             live.update(ask=ask_choice, show_tools=tools_choice == "yes")
-            # A new model, or a new key, means a new connection: the MCP server is a child process
-            # that read the keys when it started. The chats stay; the next message reconnects.
+            config.MCP_PASSWORD = password  # what the chat sends to another computer's server
+
+            # Sharing: start it, start it again with a new password, or stop it.
+            if mode == "share" and (not share.running or share.password != password):
+                live["share_failure"] = await asyncio.to_thread(share.start, config.MCP_PORT, password)
+            elif mode != "share" and share.running:
+                await asyncio.to_thread(share.stop)
+
+            # A new model, a new key or another server means a new connection: the MCP server is
+            # a child process that read the keys when it started. The chats stay; the next message
+            # reconnects.
             new_key = settings.CLAUDE_KEY in values or settings.WEATHER_KEY in values
-            if chosen != live["provider"] or new_key or live["llm"] is None:
+            new_server = mode != live["network"] or (mode == "remote" and (url, password) !=
+                                                     (live["server_url"], live["password"]))
+            live.update(network=mode, server_url=url or live["server_url"], password=password)
+            if chosen != live["provider"] or new_key or new_server or live["llm"] is None:
                 try:
                     new_llm = build_llm(chosen, model_for(chosen), args.think, args.effort)
                 except RuntimeError:
@@ -587,16 +680,23 @@ def run_graph(args, llm) -> None:
                 live.update(llm=new_llm, provider=chosen)
 
             problem = problem_now()
+            if not problem and mode == "share" and not share.running:
+                problem = f"Sharing did not start. {live['share_failure']}"
             # The chat on screen is drawn again, so a new "show the tools" choice applies to it too.
             redrawn = {chatbot: replay(history.load(current), live["show_tools"]) if current else []}
             if problem:
                 # Stay here: the welcome at the top says what is still missing.
-                return {save_result: f"⚠️ Saved, but the chat can't work yet: {problem}", **key_fields(),
-                        welcome: gr.update(value=welcome_text(problem), visible=True), **redrawn}
+                return {save_result: f"⚠️ Saved, but something doesn't work yet: {problem}", **key_fields(),
+                        welcome: gr.update(value=welcome_text(problem), visible=True), share_info: share_status(),
+                        server_address: url or live["server_url"], **redrawn}
             # All set: back to the chat, with a notice that fades by itself.
-            gr.Info(f"Settings saved. The next message uses {settings.PROVIDERS[chosen].split(' (')[0]}.")
+            notice = f"Settings saved. The next message uses {settings.PROVIDERS[chosen].split(' (')[0]}"
+            notice += {"share": f", and other computers can use this one's tools (port {config.MCP_PORT}).",
+                       "remote": f", with the tools of {url}.", "local": "."}[mode]
+            gr.Info(notice)
             return {save_result: "", **key_fields(), welcome: gr.update(value="", visible=False),
-                    tabs: gr.Tabs(selected="chat"), **redrawn}
+                    tabs: gr.Tabs(selected="chat"), share_info: share_status(),
+                    server_address: url or live["server_url"], **redrawn}
 
         gr.on([message.submit, send.click], respond, [message, chat_id],
               [message, send, stop, new_chat, past, chatbot, chat_id, confirm_panel, change, status, usage_line],
@@ -609,10 +709,16 @@ def run_graph(args, llm) -> None:
         test_key.click(test_the_key, [claude_key], [key_result])
         # Then back to the top of the page: the chat starts there, and so does the welcome
         # that says what is still missing.
-        save.click(save_settings, [provider, claude_key, weather_key, ask_when, show_tools, chat_id],
-                   [save_result, claude_key, weather_key, welcome, tabs, chatbot]
+        network.change(network_fields, [network], [remote_box, password_row, make_password, test_server, server_result])
+        make_password.click(settings.new_password, None, [net_password])
+        test_server.click(test_the_server, [server_address, net_password], [server_result])
+        save.click(save_settings, [provider, claude_key, weather_key, ask_when, show_tools, network, server_address,
+                                   net_password, chat_id],
+                   [save_result, claude_key, weather_key, welcome, tabs, chatbot, share_info, server_address]
                    ).then(None, js="() => window.scrollTo({top: 0, behavior: 'smooth'})")
-        demo.load(on_page_load, None, [past, provider, ask_when, show_tools, claude_key, weather_key, welcome, tabs])
+        demo.load(on_page_load, None, [past, provider, ask_when, show_tools, claude_key, weather_key, welcome, tabs,
+                                       network, server_address, net_password, share_info, remote_box, password_row,
+                                       make_password, test_server, server_result])
 
     # server_name stays 127.0.0.1 (Gradio's default) on purpose: the Settings tab shows and
     # changes your keys, so this page must never be reachable from another computer.
@@ -634,6 +740,7 @@ def run_graph(args, llm) -> None:
                 asyncio.run_coroutine_threadsafe(close_agent(), loop).result(timeout=20)
             except Exception as error:
                 print(f"The MCP server did not close cleanly ({type(error).__name__}).")
+        share.stop()
         demo.close()
 
 
@@ -646,8 +753,10 @@ def main(argv=None) -> None:
     except RuntimeError as e:
         if args.mode != "graph":
             sys.exit(f"❌ {e}")
-        # The web page can fix this itself: it opens on the ⚙️ Settings tab.
-        print(f"⚠️  {e} The page will open on ⚙️ Settings, where you can set it up.")
+        # The web page can fix this itself: it opens on the ⚙️ Settings tab and says what is missing.
+        # (Not the error text: "Set ANTHROPIC_API_KEY in your .env file" would send the user to .env.)
+        print("⚠️  The AI model isn't set up yet. Open the page: it starts on ⚙️ Settings, "
+              "where you can choose the model and paste your key.")
         llm = None
     if args.mode == "graph":
         run_graph(args, llm)
