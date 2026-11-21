@@ -8,7 +8,7 @@ from little_mcp.store import Inventory
 @pytest.fixture(autouse=True)
 def no_saved_choices(monkeypatch):
     """The developer's own .env may hold choices saved by the Settings tab: tests must not depend on them."""
-    for name in ("LITTLE_MCP_PROVIDER", "LITTLE_MCP_ASK"):
+    for name in ("LITTLE_MCP_PROVIDER", "LITTLE_MCP_ASK", "LITTLE_MCP_SHOW_TOOLS"):
         monkeypatch.delenv(name, raising=False)
 
 

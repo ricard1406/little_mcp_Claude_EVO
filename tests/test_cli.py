@@ -113,3 +113,17 @@ def test_errors_a_user_can_fix_are_explained_in_plain_words():
         anthropic.BadRequestError, 400, "Your credit balance is too low to access the Anthropic API."))
     # Anything else keeps its type and message, so it can still be looked up.
     assert explain_error(ValueError("odd")) == "ValueError: odd"
+
+
+def test_hidden_tools_leave_only_the_question_and_the_answer():
+    from little_mcp.agent import Event
+    from little_mcp.cli import add_to_chat
+
+    shown, boxes = [], {}
+    for event in [Event("user", "Oranges?"),
+                  Event("tool_call", tool="find_item", args={"item": "orange"}, call_id="a"),
+                  Event("tool_result", "3", tool="find_item", call_id="a"),
+                  Event("answer", "Yes, 3.")]:
+        add_to_chat(shown, boxes, event, think=False, show_tools=False)
+    # The result must not land in the last message shown, which here is the user's question.
+    assert shown == [{"role": "user", "content": "Oranges?"}, {"role": "assistant", "content": "Yes, 3."}]

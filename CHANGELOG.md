@@ -16,6 +16,19 @@
   without API access, and Anthropic credit used up.
 - The choices saved in Settings become the defaults of `--provider` and `--ask`.
   A flag still wins, for that run. `install.sh` now ends by pointing to the page.
+- After the first test on a fresh machine:
+  - **Save takes you back to the chat**, with a notice that fades by itself. If
+    something is still missing, it stays on Settings and the welcome says what.
+  - **Claude is preselected when the local model isn't downloaded.** With nothing
+    saved, the app starts with Claude if there is a key, the local model if it is
+    there, and Claude otherwise.
+  - **No more "Save password?"** from the browser after Save. The key fields are no
+    longer password fields, which browsers took for a sign-in; they still show dots.
+  - **"Show the tools in the chat": Yes / No.** No hides the 🛠️ boxes and shows only
+    the answers. The question before a change always appears.
+  - A pasted key that ends with a line break is trimmed instead of refused.
+- **README: a 5-command Quick start** at the top. The details of the installer and
+  the settings moved to "Installation in detail".
 
 ### Other changes
 - **An optional password for the HTTP server.** Set `LITTLE_MCP_PASSWORD` in `.env`

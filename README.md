@@ -24,6 +24,32 @@ You: Do we have oranges in the warehouse?
 Assistant: Yes, there are 3 oranges in stock.
 ```
 
+## Quick start (Ubuntu / Debian)
+
+Five commands, then your browser:
+
+```bash
+sudo apt install -y git
+```
+```bash
+git clone https://github.com/ricard1406/little_mcp_Claude_EVO.git && cd little_mcp_Claude_EVO
+```
+```bash
+./install.sh
+```
+```bash
+source .venv/bin/activate
+```
+```bash
+python -m little_mcp
+```
+
+Open **http://127.0.0.1:7860**. The first time, the page opens on **⚙️ Settings**:
+choose the AI model, paste your Claude API key, press **💾 Save**, and chat.
+
+Next time, only the last two commands. Everything else (what the installer
+asks, the settings, more options) is below, when you need it.
+
 ## How it works
 
 ```
@@ -45,27 +71,9 @@ a tool you add to `server.py` shows up in the agent on the next start. And
 because it is real MCP, **Claude Desktop, Claude Code or any MCP client can
 use the same server** ([see below](#use-the-server-from-claude-desktop-or-claude-code)).
 
-## Quick start (Ubuntu / Debian)
+## Installation in detail
 
-### 1. Get the code
-
-A fresh Ubuntu doesn't include `git`, so install it first:
-
-```bash
-sudo apt install -y git
-```
-```bash
-git clone https://github.com/ricard1406/little_mcp_Claude_EVO.git
-```
-```bash
-cd little_mcp_Claude_EVO
-```
-
-### 2. Install everything
-
-```bash
-./install.sh
-```
+### What install.sh does
 
 The script first lists what it can install, with download sizes. Then it **asks
 before each step**, so nothing is downloaded without your OK:
@@ -116,16 +124,21 @@ ollama pull nomic-embed-text
 
 </details>
 
-### 3. Add your keys
+### Settings and keys
 
-**The easy way: the ⚙️ Settings tab.** Start the app (step 4). The first time,
-the page opens on **⚙️ Settings** by itself. Choose the AI model, paste your keys,
-press **🔑 Test the key** if you like, then **💾 Save**. You can come back to
-this tab any time, and the next message uses the new settings: no restart.
+**The ⚙️ Settings tab** of the page holds everything a first chat needs:
 
-The page saves everything in the `.env` file of the project. It never shows a
-saved key again, only its last 4 characters (`Saved: ••••7f2a`). To change one,
-paste the new key; to keep it, leave the field empty.
+| Setting | What it does |
+|---|---|
+| AI model | Claude (needs an API key) or the local model with Ollama. **🔑 Test the key** checks a key for free. |
+| Ask before changing data | Always, not for new rows, or never (see [below](#changing-your-data-is-always-your-call)). |
+| Show the tools in the chat | Yes: each tool the AI uses appears in a box, with what it sent and what came back. No: only the answers. |
+| Weather | An optional OpenWeather key. |
+
+**💾 Save** writes them to the `.env` file of the project and takes you back to
+the chat: the next message uses them, no restart. A saved key is never shown
+again, only its last 4 characters (`Saved: ••••7f2a`). To change it, paste the
+new one; to keep it, leave the field empty.
 
 **Or by hand.** Open the settings file in a text editor:
 
@@ -145,26 +158,13 @@ ANTHROPIC_API_KEY=paste-your-anthropic-key-here
 
 In nano, save with `Ctrl+O` then `Enter`, and quit with `Ctrl+X`.
 
-### 4. Start chatting
-
-Each time you open a new terminal, activate the environment first:
-
-```bash
-source .venv/bin/activate
-```
-```bash
-python -m little_mcp
-```
-
-Then open http://127.0.0.1:7860 in your browser.
-
 ## Run it
 
 **One command.** The agent starts the MCP server for you; there's no second terminal.
 
 | Command | What it does |
 |---|---|
-| `python -m little_mcp` | Web UI at http://127.0.0.1:7860, with the model chosen in ⚙️ Settings (the local model until you choose) |
+| `python -m little_mcp` | Web UI at http://127.0.0.1:7860, with the model chosen in ⚙️ Settings |
 | `python -m little_mcp text` | Chat in the terminal instead |
 | `python -m little_mcp --provider anthropic` | Use Claude (default model `claude-opus-5-5`) |
 | `python -m little_mcp --think` | Also show the model's reasoning and every tool call |

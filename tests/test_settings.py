@@ -110,11 +110,37 @@ def test_what_stops_the_local_model(monkeypatch, models, problem):
     assert (problem in found) if problem else found == ""
 
 
-def test_the_saved_choices_are_the_defaults_and_the_command_line_wins(monkeypatch):
-    monkeypatch.setenv("LITTLE_MCP_PROVIDER", "anthropic")
+def test_the_saved_ask_is_the_default_and_the_command_line_wins(monkeypatch):
     monkeypatch.setenv("LITTLE_MCP_ASK", "except-inserts")
-    assert parse_args([]).provider == "anthropic"
     assert parse_args([]).ask == "except-inserts"
-    assert parse_args(["--provider", "ollama", "--ask", "never"]).provider == "ollama"
-    monkeypatch.setenv("LITTLE_MCP_PROVIDER", "gpt")  # not a choice: ignored
-    assert parse_args([]).provider == "ollama"
+    assert parse_args(["--ask", "never"]).ask == "never"
+    # The provider is left open here: main() asks settings.default_provider().
+    assert parse_args([]).provider is None
+    assert parse_args(["--provider", "ollama"]).provider == "ollama"
+
+
+@pytest.mark.parametrize("saved, key, local_model_ready, expected", [
+    ("ollama", "", False, "ollama"),          # a saved choice always wins
+    ("anthropic", "", True, "anthropic"),
+    ("gpt", "", True, "ollama"),              # not a valid choice: ignored
+    ("", "sk-x", True, "anthropic"),          # nothing saved, a Claude key: Claude
+    ("", "", True, "ollama"),                 # nothing saved, no key, the local model is there
+    ("", "", False, "anthropic"),             # nothing at all: Claude, so the welcome asks for a key
+])
+def test_the_model_to_start_with(monkeypatch, saved, key, local_model_ready, expected):
+    monkeypatch.setenv("LITTLE_MCP_PROVIDER", saved)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", key)
+    monkeypatch.setattr(settings, "ollama_models", lambda: ["qwen3:4b"] if local_model_ready else [])
+    assert settings.default_provider("qwen3:4b") == expected
+
+
+def test_showing_the_tools_is_on_unless_turned_off(monkeypatch):
+    monkeypatch.delenv("LITTLE_MCP_SHOW_TOOLS", raising=False)
+    assert settings.show_tools()
+    monkeypatch.setenv("LITTLE_MCP_SHOW_TOOLS", "no")
+    assert not settings.show_tools()
+
+
+def test_save_trims_a_pasted_line_break(tmp_path):
+    settings.save({"ANTHROPIC_API_KEY": "  sk-pasted\n"}, tmp_path / ".env")
+    assert dotenv_values(tmp_path / ".env")["ANTHROPIC_API_KEY"] == "sk-pasted"

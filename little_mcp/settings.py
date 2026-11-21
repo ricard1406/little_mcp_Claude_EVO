@@ -24,15 +24,36 @@ PROVIDERS = {
     "ollama": "Local model with Ollama (no key, slow without a graphics card)",
 }
 
-# Names in .env. The first three are new with the Settings tab; the keys are the usual ones.
+# Names in .env. The LITTLE_MCP_ ones are new with the Settings tab; the keys are the usual ones.
 PROVIDER = "LITTLE_MCP_PROVIDER"
 ASK = "LITTLE_MCP_ASK"
+SHOW_TOOLS = "LITTLE_MCP_SHOW_TOOLS"
 CLAUDE_KEY = "ANTHROPIC_API_KEY"
 WEATHER_KEY = "OPENWEATHER_API_KEY"
 
 
 def get(name: str, default: str = "") -> str:
     return os.getenv(name, default).strip()
+
+
+def show_tools() -> bool:
+    """Whether the chat shows each tool call and its result (yes by default: it is how you learn what the AI does)."""
+    return get(SHOW_TOOLS, "yes").lower() not in ("no", "false", "0")
+
+
+def default_provider(ollama_model: str) -> str:
+    """The model to start with when no --provider is given.
+
+    The one saved in Settings; otherwise Claude if there is a key, the local model if
+    it is downloaded, and Claude again if nothing is set up: the welcome then asks for
+    a key, instead of preselecting a local model that isn't there.
+    """
+    saved = get(PROVIDER).lower()
+    if saved in PROVIDERS:
+        return saved
+    if get(CLAUDE_KEY):
+        return "anthropic"
+    return "ollama" if setup_problem("ollama", ollama_model) == "" else "anthropic"
 
 
 def mask(secret: str) -> str:
@@ -49,6 +70,9 @@ def save(values: dict[str, str], path: Path = ENV_FILE) -> None:
     The running app sees them at once too (os.environ), including the MCP server
     it starts next. The file is made readable by its owner only: it holds keys.
     """
+    # A pasted key often ends with a line break: trim the ends, refuse one in the middle,
+    # which would write a second setting into the file.
+    values = {name: value.strip() for name, value in values.items()}
     for name, value in values.items():
         if "\n" in value or "\r" in value:
             raise ValueError(f"{name} cannot contain a line break.")
