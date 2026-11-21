@@ -4,13 +4,14 @@
 # If Little MCP is already running, it only opens the page again. Otherwise it
 # starts the app in the background, and the app opens the page when it is ready.
 # There is no terminal: the ⏻ Quit button in the page stops the app.
-# What the app prints goes to data/little_mcp.log, for when something goes wrong.
+# What happens is in data/logs/little_mcp.log, as always. What the app would print
+# on a terminal goes to data/logs/console.log: it is where a failed start shows up.
 set -uo pipefail
 cd "$(dirname "$(readlink -f "$0")")" || exit 1
 
 PORT="${GRADIO_SERVER_PORT:-7860}"
 URL="http://127.0.0.1:$PORT"
-LOG="data/little_mcp.log"
+LOG="data/logs/console.log"
 
 # Plain bash, no curl: curl is only installed with Ollama.
 answers() { (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; }
@@ -33,7 +34,7 @@ if [[ ! -x .venv/bin/python ]]; then
     exit 1
 fi
 
-mkdir -p data
+mkdir -p data/logs
 printf '\n=== %s: started from the icon ===\n' "$(date '+%Y-%m-%d %H:%M:%S')" >> "$LOG"
 # setsid: the app does not stop when the program that clicked the icon ends.
 # -u: Python writes to the log at once; buffered, a crash could leave the log empty.

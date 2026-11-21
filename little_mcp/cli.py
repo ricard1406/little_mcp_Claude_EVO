@@ -9,13 +9,14 @@
 import argparse
 import asyncio
 import json
+import logging
 import os
 import sys
 import threading
 import time
 from collections import defaultdict
 
-from . import __version__, config, settings
+from . import __version__, config, logs, settings
 from .agent import DEFAULT_CLAUDE_MODEL, DEFAULT_OLLAMA_MODEL, Event, LittleAgent, build_llm
 from .history import ChatHistory, usage_totals
 from .sharing import Sharing, firewall_on, this_computer_addresses
@@ -32,6 +33,10 @@ EXAMPLES = [
     "for an interview at our main office: in two days if the weather in her city is good, "
     "otherwise next Monday.",
 ]
+
+app_log = logging.getLogger("little_mcp.app")
+chat_log = logging.getLogger("little_mcp.chat")
+settings_log = logging.getLogger("little_mcp.settings")
 
 CONFIRM_TIMEOUT = 600  # seconds: with nobody at the page, a change is declined
 
@@ -71,6 +76,9 @@ def parse_args(argv=None):
                         "never: change the data without asking\n"
                         "(default: the choice saved in the ⚙️ Settings tab, otherwise always)")
     p.add_argument("--allow-writes", action="store_true", help="the same as --ask never")
+    p.add_argument("--verbose", action="store_true",
+                   help="also write the technical details, such as every HTTP request,\n"
+                        f"to the console and to the log ({logs.LOG_FILE.relative_to(config.PROJECT_ROOT)})")
     p.add_argument("--open-browser", action="store_true",
                    help="open the page in the browser when it is ready (the desktop icon uses it)")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -85,19 +93,36 @@ def _short(value, limit=300) -> str:
     return text if len(text) <= limit else text[:limit] + "..."
 
 
-def explain_error(error: Exception) -> str:
-    """What the chat shows for a failed answer: plain words for the problems a user can fix."""
+def plain_words(error: Exception) -> str | None:
+    """Plain words for the problems a user can fix, or None for an error the app doesn't know."""
     try:
         import anthropic
     except ImportError:  # Claude support not installed: nothing of Anthropic's can fail
-        return f"{type(error).__name__}: {error}"
+        return None
     if isinstance(error, anthropic.AuthenticationError):
         return "Claude refused the API key. Open ⚙️ Settings, paste the key again and press 🔑 Test the key."
     if isinstance(error, anthropic.PermissionDeniedError):
         return "This Claude API key is not allowed to use the API. Check it on console.anthropic.com → API Keys."
     if isinstance(error, anthropic.BadRequestError) and "credit balance" in str(error).lower():
         return "Your Anthropic credit is used up. Add some on console.anthropic.com → Billing, then ask again."
-    return f"{type(error).__name__}: {error}"
+    return None
+
+
+def explain_error(error: Exception) -> str:
+    """What the chat shows for a failed answer."""
+    return plain_words(error) or f"{type(error).__name__}: {error}"
+
+
+def log_failed_answer(chat_id: str, error: Exception) -> None:
+    """A known problem in one line, with the original error (it holds Anthropic's request_id).
+
+    An unknown one with its whole traceback: that is when someone will need to read it.
+    """
+    known = plain_words(error)
+    if known:
+        chat_log.error("chat %s: the answer failed: %s (%s: %s)", chat_id, known, type(error).__name__, error)
+    else:
+        chat_log.error("chat %s: the answer failed: %s: %s", chat_id, type(error).__name__, error, exc_info=error)
 
 
 def describe_usage(turn: dict | None, chat: dict) -> str:
@@ -537,10 +562,11 @@ def run_graph(args, llm) -> None:
             queue: asyncio.Queue = asyncio.Queue()
             queues[current] = queue
             finished_cleanly = False
+            outcome = "answered"  # or "stopped" (⏹ Stop), or "failed"
 
             async def run_turn() -> None:
                 # A task of its own, so the page can be updated while the agent works or waits for a click.
-                nonlocal finished_cleanly
+                nonlocal finished_cleanly, outcome
                 try:
                     if live["llm"] is None:
                         queue.put_nowait(Event("error", NO_MODEL))
@@ -551,8 +577,11 @@ def run_graph(args, llm) -> None:
                         queue.put_nowait(event)
                     finished_cleanly = True
                 except asyncio.CancelledError:
+                    outcome = "stopped"
                     queue.put_nowait(Event("error", "Stopped."))
                 except Exception as e:
+                    outcome = "failed"
+                    log_failed_answer(current, e)
                     queue.put_nowait(Event("error", explain_error(e)))
                 finally:
                     queue.put_nowait(None)
@@ -561,6 +590,7 @@ def run_graph(args, llm) -> None:
             started = time.monotonic()
             waiting_for_click = False
             turn_usage = None  # this answer's tokens, from the agent's "usage" event
+            tool_calls = 0
             next_event = asyncio.ensure_future(queue.get())
             try:
                 while True:
@@ -584,12 +614,20 @@ def run_graph(args, llm) -> None:
                     history.save(current, event)
                     if event.kind == "usage":
                         turn_usage = event.args
+                    tool_calls += event.kind == "tool_call"
                     add_to_chat(shown, boxes, event, args.think, live["show_tools"])
                     yield {chatbot: shown, confirm_panel: gr.update(visible=False)}
             finally:
                 next_event.cancel()
                 turns.pop(current).cancel()
                 queues.pop(current, None)
+            # One line per answer: how long, how many tools, how many tokens. Not the text: the chat
+            # has its own file in data/chats, and the log should be safe to show when asking for help.
+            tokens = (f", {turn_usage.get('input', 0):,} tokens in ({turn_usage.get('cached', 0):,} cached), "
+                      f"{turn_usage.get('output', 0):,} out") if turn_usage else ""
+            chat_log.info("chat %s: %s in %.1f s, %d tool call%s%s, %s", current,
+                          outcome, time.monotonic() - started, tool_calls,
+                          "" if tool_calls == 1 else "s", tokens, live["provider"])
             if not finished_cleanly and "ready" in host and host["ready"].done() \
                     and not host["ready"].exception():
                 await host["ready"].result().forget(current)
@@ -674,7 +712,13 @@ def run_graph(args, llm) -> None:
             try:
                 settings.save(values)
             except (ValueError, OSError) as error:
+                settings_log.warning("could not save the settings: %s", error)
                 return {save_result: f"❌ Could not save: {error}"}
+            # Which settings, never the secrets themselves.
+            settings_log.info("saved: model %s, ask %s, show tools %s, network %s%s%s%s, network password %s",
+                              chosen, ask_choice, tools_choice, mode, f" ({url})" if mode == "remote" else "",
+                              ", new Claude key" if typed_claude.strip() else "",
+                              ", new weather key" if typed_weather.strip() else "", "on" if password else "off")
 
             live.update(ask=ask_choice, show_tools=tools_choice == "yes")
             config.MCP_PASSWORD = password  # what the chat sends to another computer's server
@@ -757,7 +801,10 @@ def run_graph(args, llm) -> None:
 
     # server_name stays 127.0.0.1 (Gradio's default) on purpose: the Settings tab shows and
     # changes your keys, so this page must never be reachable from another computer.
+    # quiet: no "Running on local URL" and, above all, no "set share=True" hint, which for this app
+    # would mean putting the Settings page, keys included, on the internet. Our own lines follow.
     demo.launch(share=False, server_name="127.0.0.1", prevent_thread_lock=True, inbrowser=args.open_browser,
+                quiet=True,
                 css="#chat-history { max-height: 60vh; overflow-y: auto; } #usage { opacity: 0.7; font-size: 0.9em; }"
                     " #settings { max-width: 760px; }"
                     # Gradio's outer box has overflow: hidden, which turns "sticky" off for everything
@@ -768,13 +815,21 @@ def run_graph(args, llm) -> None:
                     # Dots instead of letters in the key fields. Chrome, Edge and Safari support it;
                     # a browser that doesn't shows the letters, on your own screen only.
                     " .secret input, .secret textarea { -webkit-text-security: disc; }")
+    page = f"http://127.0.0.1:{demo.server_port}"
+    print(f"Little MCP is running: open {page}")
+    print("Stop it with ⏻ Quit in the page, or Ctrl+C here.")
+    print(f"What happens is written to {logs.LOG_FILE}")
+    app_log.info("page ready at %s", page)
+    why = "⏻ Quit in the page"
     try:
         # The web server runs in its own thread; this one waits for ⏻ Quit or Ctrl+C.
         while not quit_requested.wait(0.5):
             pass
     except KeyboardInterrupt:
+        why = "Ctrl+C"
         print("\nClosing...")
     finally:
+        app_log.info("stopping (%s)", why)
         loop = host.get("loop")
         if loop is not None and loop.is_running():
             try:
@@ -783,10 +838,13 @@ def run_graph(args, llm) -> None:
                 print(f"The MCP server did not close cleanly ({type(error).__name__}).")
         share.stop()
         demo.close()
+        app_log.info("stopped")
 
 
 def main(argv=None) -> None:
     args = parse_args(argv)
+    logs.rotate()
+    logs.setup(verbose=args.verbose)
     if args.provider is None:  # chosen here, not in parse_args: it may ask Ollama what is downloaded
         args.provider = settings.default_provider(args.model or DEFAULT_OLLAMA_MODEL)
     try:
@@ -799,6 +857,10 @@ def main(argv=None) -> None:
         print("⚠️  The AI model isn't set up yet. Open the page: it starts on ⚙️ Settings, "
               "where you can choose the model and paste your key.")
         llm = None
+    app_log.info("started: Little MCP %s, %s, model %s, network %s%s", __version__,
+                 "web page" if args.mode == "graph" else "terminal chat", args.provider,
+                 "remote " + args.server_url if args.server_url else settings.network_mode(),
+                 "" if llm else " (no model set up yet)")
     if args.mode == "graph":
         run_graph(args, llm)
         return

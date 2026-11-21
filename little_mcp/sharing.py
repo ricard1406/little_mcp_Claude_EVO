@@ -14,7 +14,7 @@ import threading
 import time
 from pathlib import Path
 
-log = logging.getLogger("little_mcp")
+log = logging.getLogger("little_mcp.share")
 
 EVERYWHERE = "0.0.0.0"  # listen on every network of this computer, not only on itself
 
@@ -92,7 +92,7 @@ class Sharing:
             self.stop()
             return self._failure or "The server did not start in 10 seconds."
         self.port, self.password = port, password
-        log.info("Sharing the tools on port %s, password %s.", port, "on" if password else "OFF")
+        log.info("sharing on: port %s, password %s", port, "on" if password else "OFF")
         return ""
 
     def _run(self) -> None:
@@ -106,5 +106,6 @@ class Sharing:
         if self._thread is not None:
             self._server.should_exit = True
             self._thread.join(timeout=10)
+            log.info("sharing off")
         self._server = self._thread = None
         self.port, self.password = 0, ""

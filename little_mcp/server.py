@@ -12,8 +12,9 @@ Run it:
 
 import argparse
 import hmac
+import json
 import logging
-import sys
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -22,17 +23,16 @@ import requests
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
-from . import calculator, config
+from . import calculator, config, logs
 from .rag import DocumentIndex
 from .store import Inventory, Table
 from .tinysql import Database
 
-# In stdio mode stdout carries the protocol, so logs must go to stderr.
-# Short "[server]" lines, since they appear in the middle of the chat.
-logging.basicConfig(level=logging.INFO, stream=sys.stderr, format="  [server] %(message)s")
-for noisy in ("mcp", "httpx", "chromadb"):
-    logging.getLogger(noisy).setLevel(logging.WARNING)
-log = logging.getLogger("little_mcp")
+# The log goes to data/logs/little_mcp.log (see logs.py). Whoever starts the server sets
+# it up: main() below, or the app when it shares the tools. In stdio mode stdout carries
+# the protocol, so nothing may be printed there: the console part goes to stderr.
+log = logging.getLogger("little_mcp.share")
+tools_log = logging.getLogger("little_mcp.tools")
 
 
 class _QuietSessionEnd(logging.Filter):
@@ -55,7 +55,49 @@ class _QuietSessionEnd(logging.Filter):
 
 logging.getLogger("mcp.server.streamable_http").addFilter(_QuietSessionEnd())
 
-mcp = FastMCP(
+class LoggedFastMCP(FastMCP):
+    """FastMCP that writes every tool call to the log: which tool, who asked, from where, how long.
+
+    Every call goes through call_tool, so this is the one place that sees them all,
+    from this computer's chat (stdio) and from other computers (HTTP).
+    """
+
+    async def call_tool(self, name, arguments):
+        who = _caller(self)
+        started = time.monotonic()
+        try:
+            result = await super().call_tool(name, arguments)
+        except Exception as error:
+            tools_log.warning("%s by %s, %d ms, FAILED: %s | %s", name, who, _ms(started), error, _short(arguments))
+            raise
+        tools_log.info("%s by %s, %d ms: %s", name, who, _ms(started), _short(arguments))
+        return result
+
+
+def _caller(server: FastMCP) -> str:
+    """'claude-code from 192.168.1.20', or 'mcp on this computer' for this computer's chat (stdio)."""
+    try:
+        request_context = server.get_context().request_context
+    except Exception:  # outside a request, as in some tests
+        return "a client"
+    try:
+        client = request_context.session.client_params.clientInfo.name
+    except AttributeError:  # a client that gave no name
+        client = "a client"
+    host = getattr(getattr(request_context.request, "client", None), "host", None)  # HTTP only
+    return f"{client} from {host}" if host else f"{client} on this computer"
+
+
+def _ms(started: float) -> int:
+    return round((time.monotonic() - started) * 1000)
+
+
+def _short(arguments: dict, limit: int = 300) -> str:
+    text = json.dumps(arguments, ensure_ascii=False)
+    return text if len(text) <= limit else text[:limit] + "..."
+
+
+mcp = LoggedFastMCP(
     "little-mcp",
     instructions=(
         "Tools for a small business assistant: current time and weather for a city, "
@@ -354,7 +396,7 @@ class PasswordCheck:
             # compare_digest takes the same time however many characters match,
             # so the timing of the answers cannot reveal the password letter by letter.
             if not hmac.compare_digest(given, self.expected):
-                log.warning("Refused a request with a wrong or missing password, from %s",
+                log.warning("refused a wrong or missing password, from %s",
                             (scope.get("client") or ("unknown",))[0])
                 # No "WWW-Authenticate" header: an MCP client that sees one may try an
                 # OAuth sign-in, which this server does not offer.
@@ -391,7 +433,9 @@ def http_server(host: str, port: int, password: str):
     app = mcp.streamable_http_app()
     if password:
         app = PasswordCheck(app, password)
-    server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level=mcp.settings.log_level.lower()))
+    # log_config=None and log_level=None: uvicorn would otherwise print to the console with its own
+    # handlers, and set its own levels. Its lines go to our log (logs.py), every request only if verbose.
+    server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_config=None, log_level=None))
     logging.getLogger("uvicorn.error").addFilter(_QuietShutdown(server))
     return server
 
@@ -423,8 +467,14 @@ def main() -> None:
                         help="stdio (default): a client starts the server. http: run it standalone.")
     args = parser.parse_args()
     if args.transport == "http":
+        # Started by hand in a terminal: show what happens there too. Only a program that
+        # owns the log rotates it; in stdio mode the program that started us does.
+        logs.rotate()
+        logs.setup(console_level=logging.INFO)
         serve_http()
         return
+    # Started by the chat: its console is the chat's terminal, so only warnings go there.
+    logs.setup(console_level=logging.WARNING)
     try:
         mcp.run(transport="stdio")
     except KeyboardInterrupt:  # Ctrl+C in the terminal chat reaches this child process too

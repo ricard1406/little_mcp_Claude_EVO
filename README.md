@@ -164,8 +164,9 @@ In nano, save with `Ctrl+O` then `Enter`, and quit with `Ctrl+X`.
 | Command | What it does |
 |---|---|
 | `python -m little_mcp` | Web UI at http://127.0.0.1:7860, with the model chosen in ⚙️ Settings |
-| `./launch.sh` | What the apps menu icon runs: starts the app in the background and opens the page, or only opens the page if the app is already running. Its messages go to `data/little_mcp.log` |
+| `./launch.sh` | What the apps menu icon runs: starts the app in the background and opens the page, or only opens the page if the app is already running. What it would print on a terminal goes to `data/logs/console.log` |
 | `python -m little_mcp --open-browser` | Also open the page in the browser when it is ready |
+| `python -m little_mcp --verbose` | Also show the technical details (every HTTP request, the libraries' messages), on the console and in the log |
 | `python -m little_mcp text` | Chat in the terminal instead |
 | `python -m little_mcp --provider anthropic` | Use Claude (default model `claude-opus-5-5`) |
 | `python -m little_mcp --think` | Also show the model's reasoning and every tool call |
@@ -604,6 +605,49 @@ need no Ollama, no API key and no network.
 - **Small models ignore tools or loop**: try a bigger model (`--model qwen3:8b`), or Claude.
 - **The page says "Working..." for a long time**: without a graphics card a local model is slow, and `qwen3:4b` always thinks at length before it acts. On 2 CPU cores, storing a dozen rows can take over half an hour. Press **Stop**, or use Claude (`--provider anthropic`).
 - **Can't reach the server from another machine**: see [If it doesn't connect](#if-it-doesnt-connect).
+
+### The log: what happened, and when
+
+The console stays quiet: the address of the page, how to stop, and real problems.
+Everything else goes to **`data/logs/little_mcp.log`**, one line per event:
+
+```
+2026-11-21 20:21:50  INFO   app       started: Little MCP 0.7.0, web page, model anthropic, network share
+2026-11-21 20:21:51  INFO   share     sharing on: port 8000, password on
+2026-11-21 20:31:05  INFO   tools     tiny_sql_write by claude-code from 192.168.1.20, 34 ms: {"sql": "INSERT INTO BOOKS ..."}
+2026-11-21 20:31:40  WARN   tools     adjust_stock by mcp on this computer, 0 ms, FAILED: NOPE is not in FRUITS. ...
+2026-11-21 20:32:10  WARN   share     refused a wrong or missing password, from 192.168.1.20
+2026-11-21 20:33:02  INFO   chat      chat 2026-11-21_20-32-50_9b6f: answered in 6.1 s, 2 tool calls, 6,919 tokens in (3,298 cached), 195 out, anthropic
+2026-11-21 20:40:00  INFO   app       stopping (⏻ Quit in the page)
+```
+
+Time, level, area, and what happened:
+
+| Area | What it records |
+|---|---|
+| `app` | start, stop, and why it stopped |
+| `tools` | **every tool call**: which tool, which client (`mcp` is this computer's chat), from which computer, how long, and the arguments. With a shared database, it answers "who changed what, and when?" |
+| `share` | sharing on or off, refused passwords |
+| `chat` | each answer: how long, how many tools, how many tokens; a failed answer with its error (the whole traceback when the error is an unexpected one) |
+| `settings` | what was saved: which choices, and *that* a key changed, never the key |
+| `docs` | the index for document search |
+
+Handy commands:
+
+```bash
+tail -f data/logs/little_mcp.log
+```
+```bash
+grep -E " (WARN|ERROR) " data/logs/little_mcp.log
+```
+
+Never in the log: passwords, keys, and the text of your chats (the chats have their
+own files in `data/chats`). So you can show it to someone who helps you. When the file
+passes 2 MB, the next start renames it to `little_mcp.log.1` and starts a new one;
+the three most recent old files are kept. `--verbose` adds the technical details.
+
+Started from the apps menu icon, the app has no terminal: what it would print there
+goes to `data/logs/console.log`. That is where to look if it doesn't start at all.
 
 ## License
 

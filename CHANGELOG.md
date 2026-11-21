@@ -51,11 +51,27 @@
   section the tab got longer than a screen, and in a test the form looked done while
   Save, out of sight, was never pressed.
 
+### A quiet console, and a log for whoever wants details
+- **The console says only what a user needs:** the page's address, how to stop, and
+  real problems. No more `INFO: … "POST /mcp HTTP/1.1" 200` for every request, and no
+  more Gradio hint "set share=True", which for this app would put the Settings page,
+  keys included, on the internet.
+- **`data/logs/little_mcp.log`**, one line per event in columns (time, level, area,
+  what happened): start and stop, sharing, refused passwords, saved settings (never the
+  keys), every answer (time, tool calls, tokens), and **every tool call: which tool,
+  which client, from which computer, how long, with what arguments**. With a shared
+  database, it tells who changed what, and when.
+- A failed answer that the app understands takes one line, with the original error;
+  an unexpected one is written with its whole traceback.
+- The app and its MCP server write to the same file; it is rotated at start when it
+  passes 2 MB, keeping three old ones. Never in it: passwords, keys, chat text.
+- `--verbose` shows the technical details too, on the console and in the log.
+
 ### An icon in the apps menu: no terminal at all
 - **`install.sh` step 6** adds a "Little MCP" icon to the apps menu (a `.desktop`
   file in your own folder, no sudo). One click starts the app and opens the page;
   a second click only opens the page again, instead of starting a second app.
-- **`launch.sh`**, what the icon runs: the app's messages go to `data/little_mcp.log`,
+- **`launch.sh`**, what the icon runs: what the app would print goes to `data/logs/console.log`,
   and if the app can't start, a desktop notification says so and where to look.
 - **⏻ Quit** at the top of the page stops the app cleanly, sharing included. Started
   from the icon there is no terminal and no Ctrl+C. Quit doesn't send Ctrl+C to the
