@@ -1,6 +1,23 @@
 # Changelog
 
-## Unreleased
+## 0.8.0: no terminal needed, 2026-11-22
+
+Little MCP no longer asks you to edit files or type commands after installing. A
+**⚙️ Settings** tab sets the AI model, the keys, when to ask before changes and how
+two computers share their tools; an **icon in the apps menu** starts the app and opens
+the page; **⏻ Quit** stops it. Behind the scenes, a **structured log** records what
+happened and the **exact commit** that ran, for whoever needs to look.
+
+### Upgrading from 0.7.0
+- `git pull`, then start the app again. No new libraries: no `pip install` needed.
+- Run `./install.sh` once more if you want the **apps menu icon** (step 6). The steps
+  already done are skipped.
+- **A behaviour change:** with nothing chosen in ⚙️ Settings, 0.7.0 always started the
+  local model; 0.8.0 starts **Claude if `.env` has an API key**. To keep the local model,
+  choose it in ⚙️ Settings once (or start with `--provider ollama`).
+- Your `.env` keeps working as it is. The Settings tab adds a few `LITTLE_MCP_...` lines
+  to it when you press Save, and makes the file readable by you only.
+- The log is in `data/logs/little_mcp.log`.
 
 ### ⚙️ Settings tab
 - **Set up the app from the page, not from `.env`.** A new tab in the web UI: the AI

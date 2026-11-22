@@ -166,7 +166,7 @@ In nano, save with `Ctrl+O` then `Enter`, and quit with `Ctrl+X`.
 | `python -m little_mcp` | Web UI at http://127.0.0.1:7860, with the model chosen in ⚙️ Settings |
 | `./launch.sh` | What the apps menu icon runs: starts the app in the background and opens the page, or only opens the page if the app is already running. What it would print on a terminal goes to `data/logs/console.log` |
 | `python -m little_mcp --open-browser` | Also open the page in the browser when it is ready |
-| `python -m little_mcp --version` | Which code exactly: `Little MCP 0.7.0 · commit fe4c8dd (2026-11-21)`. The same line opens the console, the page (under the title) and each start in the log. `+ local changes` means a project file was edited after that commit; without git (a ZIP download) only the version shows |
+| `python -m little_mcp --version` | Which code exactly: `Little MCP 0.8.0 · commit e9da361 (2026-11-22)`. The same line opens the console, the page (under the title) and each start in the log. `+ local changes` means a project file was edited after that commit; without git (a ZIP download) only the version shows |
 | `python -m little_mcp --verbose` | Also show the technical details (every HTTP request, the libraries' messages), on the console and in the log |
 | `python -m little_mcp text` | Chat in the terminal instead |
 | `python -m little_mcp --provider anthropic` | Use Claude (default model `claude-opus-5-5`) |
@@ -613,7 +613,7 @@ The console stays quiet: the address of the page, how to stop, and real problems
 Everything else goes to **`data/logs/little_mcp.log`**, one line per event:
 
 ```
-2026-11-21 20:21:50  INFO   app       started: Little MCP 0.7.0, web page, model anthropic, network share
+2026-11-21 20:21:50  INFO   app       started: Little MCP 0.8.0 · commit e9da361 (2026-11-22), web page, model anthropic, network share
 2026-11-21 20:21:51  INFO   share     sharing on: port 8000, password on
 2026-11-21 20:31:05  INFO   tools     tiny_sql_write by claude-code from 192.168.1.20, 34 ms: {"sql": "INSERT INTO BOOKS ..."}
 2026-11-21 20:31:40  WARN   tools     adjust_stock by mcp on this computer, 0 ms, FAILED: NOPE is not in FRUITS. ...
