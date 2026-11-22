@@ -17,12 +17,19 @@ See [CHANGELOG.md](CHANGELOG.md) for what changed and why.
 > AI answers can be wrong, and when you use Claude your questions and document passages
 > are sent to Anthropic. Read [DISCLAIMER.md](DISCLAIMER.md) before you use your own data.
 
-```
-You: Do we have oranges in the warehouse?
-  🛠️  find_item({"item": "orange"})
-  ↳ [{"table": "FRUITS", "item": "ORANGE", "quantity": 3}]
-Assistant: Yes, there are 3 oranges in stock.
-```
+One question, three tools: the AI finds the candidate in your documents, checks the
+weather in her city, picks the date and writes the invitation.
+
+![The chat: the AI finds Dianne Bridgewater in the candidates list, checks the weather in Montgomery and writes an interview invitation](docs/screenshots/chat-invitation.png)
+
+Tables of your own: ask in plain words, and the AI writes the SQL for myTinySQL.
+
+![The chat: the AI creates a table called MYLIBRARY and stores two books in it](docs/screenshots/chat-tables.png)
+
+Everything is set up in the page: the AI model and its key, when to ask before
+changing data, and sharing the tools with other computers.
+
+![The Settings tab: AI model, Claude API key, ask before changing data, show the tools, and network sharing](docs/screenshots/settings.png)
 
 ## Quick start (Ubuntu / Debian)
 
