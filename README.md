@@ -299,7 +299,7 @@ itself. It works the same way across two virtual machines.
 No second terminal and no commands to remember:
 
 1. **On the server machine**, in ⚙️ Settings → **Network**, choose *Share this
-   computer's tools with other computers*. Press **🎲 Make one** for a password
+   computer's tools with other computers*. Press **🎲 Create a password**
    (or leave it empty for none), then **💾 Save**. The tab now shows 🟢 **Sharing**,
    the addresses to use, the password, and the Claude Code command to copy.
 2. **On the client machine**, in ⚙️ Settings → **Network**, choose *Use the tools of

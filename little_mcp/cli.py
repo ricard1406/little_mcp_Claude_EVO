@@ -520,7 +520,7 @@ def run_graph(args, llm) -> None:
                     with gr.Column(visible=live["network"] != "local") as password_row:
                         net_password = gr.Textbox(label="Network password", html_attributes=no_autofill,
                                                   info="The same on both computers. Empty: no password.")
-                        make_password = gr.Button("🎲 Make one", size="sm", visible=live["network"] == "share")
+                        make_password = gr.Button("🎲 Create a password", size="sm", visible=live["network"] == "share")
                     test_server = gr.Button("🔌 Test the connection", size="sm",
                                             visible=live["network"] == "remote")
                     server_result = gr.Markdown("")

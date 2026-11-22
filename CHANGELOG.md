@@ -38,7 +38,7 @@
 - **Use the tools of another computer.** Type its address as you like it
   (`192.168.1.20`, `ubuntu-TEST.local`): the page completes it. **🔌 Test the
   connection** lists the other computer's tools, or says in plain words what's wrong.
-- **🎲 Make one** creates a network password. It is shown, not hidden, because you
+- **🎲 Create a password** makes a random network password. It is shown, not hidden, because you
   type it on the other computer; the API keys stay hidden.
 - The server can be started and stopped again in the same run. Shared on the
   network, it accepts requests addressed by IP or name: the MCP library's localhost
@@ -82,6 +82,10 @@
   app: a program started in the background ignores it, and the app would have kept
   running unseen.
 - `--open-browser` opens the page when it is ready.
+- With the icon, `launch.sh` opens the page itself once the app answers, and throws the
+  browser's output away. Opened by the app, the browser wrote its own harmless messages
+  ("Failed sending zygote boot message"…) into `console.log`, where an "ERROR" from another
+  program sent the reader looking for a problem in Little MCP.
 - **Gradio's usage statistics are off.** Gradio sent them to huggingface.co by
   default; the log of a test showed it. This app says where your data goes, and that
   was a place nobody chose.
